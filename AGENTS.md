@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues live in GitHub Issues of the private repo kamyu1537/vrc-print-cropper. See `docs/agents/issue-tracker.md`.
+Issues live in GitHub Issues of the repo vrc-booth/vrc-print-cropper. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
