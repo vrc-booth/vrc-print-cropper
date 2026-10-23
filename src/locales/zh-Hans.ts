@@ -1,0 +1,25 @@
+import type { Dict } from "./ko";
+
+export const zhHans: Dict = {
+  languageName: "简体中文",
+  appTitle: "VRChat 打印照片裁剪",
+  language: "语言",
+  openFiles: "打开图片",
+  dropHint: "将图片拖放到此处",
+  privacyNote: "所有处理都在浏览器中完成，不会上传任何内容。",
+  emptyList: "没有打开的图片",
+  noSelection: "请从列表中选择图片",
+  kind_print: "打印照片",
+  kind_photo: "照片",
+  rotateLeft: "向左旋转",
+  rotateRight: "向右旋转",
+  flipHorizontal: "水平翻转",
+  adjust_brightness: "亮度",
+  adjust_contrast: "对比度",
+  adjust_saturation: "饱和度",
+  adjust_temperature: "色温",
+  reset: "重置",
+  save: "保存",
+  loadFailed: "无法打开 {name}",
+  saveFailed: "无法保存 {name}",
+};

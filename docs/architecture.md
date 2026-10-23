@@ -1,0 +1,174 @@
+# 설계
+
+## 문제
+
+여러 장의 VRChat 이미지를 열어 프린트면 프레임을 걷어 내고, 이미지마다 회전·반전과 보정을 적용해 무손실 PNG로 저장하는 정적 웹 앱이다. 모양이 뻔하지 않은 이유는 네 가지다.
+
+- 캔버스 `toBlob` 은 부가 청크를 버린다. 그래서 저장은 "렌더 → PNG 인코딩 → 원본 XMP iTXt 청크를 바이트째 다시 끼우기" 순서가 된다.
+- 2048x1440 프린트 40장을 모두 디코딩해 두면 약 470 MB다. 전체 해상도 픽셀을 이미지별 상태로 들고 있을 수 없다.
+- 미리보기와 저장 결과가 어긋나면 안 된다. 그러면서도 미리보기는 휴대폰에서도 빨라야 한다.
+- 다섯 언어(`ko`, `en`, `ja`, `zh-Hans`, `zh-Hant`)의 번역이 라이브러리 없이 빠짐없이 유지돼야 한다.
+
+실측으로 확인한 제약은 다음과 같다. 프린트는 2048x1440이고 사진은 (64, 69)에서 시작하는 1920x1080 영역이다. 위·왼쪽·오른쪽 여백은 순백이다. XMP는 IHDR 바로 뒤의 iTXt 청크에 있고 방향 정보는 없다. 캔버스 `filter` 는 쓰지 않는다.
+
+## 사용 (호출자 관점)
+
+사용자가 읽는 설명:
+
+> VRChat 프린트나 사진을 끌어다 놓거나 "이미지 열기"를 누르세요. 프린트는 흰 프레임과 캡션이 자동으로 잘리고, 다른 이미지는 그대로 둡니다. 목록에서 이미지를 고르고 회전·반전하거나 네 슬라이더를 움직인 뒤 저장하세요. 프린트는 `<이름>_crop.png`, 그 밖의 이미지는 `<이름>_edit.png` 로 저장됩니다. VRChat 메타데이터(월드, 촬영자, 날짜)는 파일에 남습니다. 아무것도 업로드되지 않습니다.
+
+코드 안의 호출 지점:
+
+```ts
+// main.ts: 열기, 편집, 저장
+const { source, thumb } = await openSource(file);                  // 한 번 디코딩, 판별, XMP 보관, 썸네일
+draw(rowCanvas, render(thumb, item.edit));                         // 썸네일·미리보기·저장이 같은 render
+updateEdit(id, (e) => setAdjust(e, "contrast", Number(input.value)));
+updateEdit(id, rotateRight);
+const { name, blob } = await exportSource(item.source, item.edit); // 전체 해상도 + XMP + 파일 이름
+```
+
+```ts
+// edit.test.ts: node, DOM 없음
+const edit = flipHorizontal(rotateRight(IDENTITY_EDIT));
+expect(render(src, edit)).toEqual(naiveFlipH(naiveRotateCW(src)));
+expect(render(src, IDENTITY_EDIT).data).toEqual(src.data);
+```
+
+```ts
+// png.test.ts
+const xmp = findXmpChunk(syntheticPng({ withXmp: "<x:xmpmeta/>" }))!;
+expect(findXmpChunk(withXmp(canvasLikePng(), xmp))).toEqual(xmp);
+```
+
+## 구조
+
+| 파일 | 맡는 것 | DOM |
+|---|---|---|
+| `src/edit.ts` | `Pixels`, `Rect`, `Edit`(D4 방향 + 보정 네 값), 편집 전이 함수, `render` | 없음 |
+| `src/print.ts` | 프린트 규격, `classify`, `outputName` | 없음 |
+| `src/png.ts` | `XmpChunk` 브랜드, `findXmpChunk`, `withXmp` | 없음 |
+| `src/source.ts` | `openSource`, `readSource`, `exportSource` | 있음 |
+| `src/i18n.ts` + `src/locales/*.ts` | 현재 언어, `pickLocale`, `t`, `label` | `setLocale`, `label` 만 |
+| `src/main.ts` | 목록, 선택, 미리보기 캐시, DOM 연결 | 있음 |
+
+**데이터.**
+
+- `Edit = { orientation: { turns: 0|1|2|3, flip }, adjust: Record<AdjustKey, number> }` 는 불변 값이다. 방향은 D4 군의 원소라서 어떤 버튼 순서도 8가지 중 하나로 접힌다. 화면 기준 좌우 반전은 `turns = (4 - turns) % 4` 규칙 하나로 `flipHorizontal` 에만 있다(model-the-domain).
+- `Source = { file, kind, rect, xmp }` 는 `openSource` 가 한 번 만들고 바뀌지 않는다. `kind` 와 `rect` 는 같은 `classify` 호출에서 나오므로, 프린트인데 자르는 영역이 다른 상태는 생길 수 없다. 픽셀은 들고 있지 않다.
+- `Item = { id, source, thumb, edit, row }` 는 `main.ts` 에만 있다. `edit` 을 쓰는 곳은 `updateEdit` 하나다.
+
+**흐름.**
+
+```
+File ─openSource─► Source{kind,rect,xmp} + thumb(240px)       [한 번 디코딩 후 픽셀 버림]
+선택 ─readSource(source, 1280)─► 미리보기 Pixels (선택된 한 장만 캐시)
+슬라이더·회전 ─updateEdit─► item.edit ─rAF─► render(미리보기, edit) ─► 캔버스
+                                     └─────► render(thumb, edit)   ─► 목록 행
+저장 ─exportSource─► readSource(전체) ► render ► toBlob PNG ► withXmp ► {name, blob}
+```
+
+**핵심 결정.**
+
+1. **썸네일, 미리보기, 저장이 `render(src, edit)` 하나를 쓴다.** 셋은 입력 해상도만 다르다. 두 번째 경로가 없으니 어긋날 수 없다. 보정은 256칸 표 세 개(색온도 → 밝기 → 대비)와 픽셀별 채도 혼합으로 미리 계산한다. `render(src, IDENTITY_EDIT)` 는 바이트가 같다.
+2. **자르기는 디코딩할 때 `drawImage` 의 원본 영역으로 한다.** 배율 1이면 정확한 복사다. 축소도 같은 호출에서 하므로 `readSource` 가 사진 픽셀을 얻는 유일한 길이고, 앱이 보는 모든 픽셀은 이미 잘려 있다.
+3. **`source.ts` 가 깊은 모듈이다.** 세 함수 뒤에 `colorSpaceConversion: "none"`·`premultiplyAlpha: "none"` 디코딩, 캔버스 읽기, 자르기, 축소, PNG 인코딩, XMP 끼우기, 이름 짓기를 숨긴다. ESLint `no-restricted-imports` 로 `print.ts` 와 `png.ts` 는 `source.ts` 만 가져오게 막는다(importable-internals). ESLint는 접근 제어자 규칙 때문에 어차피 들어간다.
+4. **XMP는 청크 통째로 옮긴다.** `findXmpChunk` 는 길이·타입·데이터·CRC를 그대로 잘라 `XmpChunk` 로 표시한다. `withXmp` 는 그 청크를 오프셋 33(IHDR 바로 뒤)에 넣고, 이미 있는 XMP는 먼저 지워 두 번 넣어도 결과가 같다. `findXmpChunk` 는 사용자 파일을 받는 신뢰 경계라서 잘못된 입력에 예외 대신 null을 돌려준다. `withXmp` 의 입력은 우리가 만든 캔버스 출력이므로 모양이 틀리면 버그로 보고 예외를 던진다(boundary-discipline).
+5. **목록은 한 곳에만 둔다.** 슬라이더는 `ADJUST_KEYS`, 회전 버튼은 `ORIENT_ACTIONS`, 언어는 `DICTIONARIES` 에서 만든다. 다른 언어 사전은 `Dict` 타입이라 키가 빠지거나 남으면 타입 오류다. 프린트 여백 띠 `MARGIN_STRIPS` 는 `PRINT_PHOTO` 에서 계산하므로 판별과 자르기가 같은 상수를 본다.
+6. **화면 글자는 `label(el, key)` 하나로 넣는다.** `index.html` 에는 메시지 키가 없고 `id` 만 있다. `main.ts` 의 `STATIC_LABELS` 가 id와 키를 잇는다. 언어를 바꾸면 `data-i18n` 이 붙은 요소를 한 번에 다시 채운다.
+7. **잠금 없이 비동기를 다룬다.** 파일은 순서대로 열어 한 번에 디코딩 한 장만 메모리에 둔다. 선택이 바뀐 뒤 늦게 끝난 디코딩은 버린다. 저장은 시작할 때 `edit` 을 복사해 두고 쓴다.
+
+검증은 세 경계에 있다. `setAdjust` 는 슬라이더 값을 [-100, 100]으로 자르고 반올림한다(NaN은 0). `pickLocale` 은 저장된 값이 유효한 언어일 때만 받는다. `findXmpChunk` 는 파일 바이트를 검사한다. 경계 안쪽은 타입을 믿는다.
+
+**하지 않는 것.** 실행 취소, 목록에서 지우기, 새로고침 뒤 편집 유지, Worker, 선형 색공간 연산, ICC 처리, ZIP, 전체 적용, 자유 각도 회전, 수동 자르기.
+
+**인터페이스 깊이.** UI가 아는 것은 `openSource`, `readSource`, `exportSource`, `render`, 다섯 개의 `Edit` 전이 함수, `t`/`label`/`setLocale` 이다. 그 뒤에 프린트 규격, 청크 탐색, 디코딩 옵션, 축소, 색 연산, 방향 대수가 숨는다.
+
+## 합성 결정
+
+모델 네 개(opus, fable, sonnet, haiku)가 따로 후보를 냈다. 교차 심사(fable)와 직접 채점 모두 opus 후보를 베이스로 골랐다. 심사 점수는 opus 28, sonnet 26, fable 23, haiku 19였다.
+
+- **베이스 opus:** 여백 띠의 행 범위를 캡션 위로 한정했고, `premultiplyAlpha: "none"` 을 지정했으며, 멱등 splice와 잘린 파일 처리를 갖췄다. 브라우저 경계를 `source.ts` 하나에 모았다.
+- **sonnet에서 가져옴:** 여백 띠를 `PRINT_PHOTO` 에서 계산하는 방식(`MARGIN_STRIPS`). 저장 버튼은 편집기에 하나만 둔다. opus는 목록 행마다 저장 버튼을 두어 같은 일을 하는 길이 둘이었다.
+- **fable에서 가져옴:** `detectLocale` 과 `initialLocale` 을 순수 함수 `pickLocale(languages, stored)` 하나로 합쳤다.
+- **sonnet 방향으로 바꿈:** `index.html` 의 `data-i18n` 키를 없앴다. opus는 HTML 안의 키를 정규식 테스트로 확인했는데, 그 테스트가 필요 없어진다.
+- **버림:**
+  - sonnet의 `Session`·이벤트·`Codec` 계층. "목록 하나, 선택 하나"에는 벌지 못한 구조다.
+  - haiku의 reducer + session 이중 층.
+  - fable의 이미지별 1024px 미리보기 상주. 40장이면 약 100 MB다.
+  - 심사가 제안한 "순수 함수 자르기". 전체 해상도 경로와 축소 경로에 자르기가 두 번 생기고, 크롭 정확도는 실제 프린트와 픽셀을 비교하는 검증으로 확인한다.
+- **후보에서 발견한 버그:**
+  - haiku: 흰색 판정에 `|` 를 써서 254가 섞여도 통과한다.
+  - haiku: 좌우 띠를 캡션 행까지 검사한다.
+  - haiku: 90° 회전 뒤 반전 합성이 틀렸다.
+  - haiku: XMP를 `subarray` 로 잘라 파일 전체 버퍼를 붙잡는다.
+  - fable: 없는 사전 파일을 import하고, 청크 길이 검사가 없다.
+
+  모두 베이스에는 해당하지 않는다.
+
+## 받아들인 트레이드오프
+
+- 선택과 저장 때 파일을 다시 디코딩한다(각 30~80 ms). 대신 메모리는 썸네일 40장과 미리보기 한 장으로 평평하게 유지된다.
+- 보정은 감마 인코딩된 sRGB에서 단순 곡선으로 계산한다. 대신 표 세 개로 한 번에 처리하고 테스트가 쉽다. 강한 색온도는 켈빈 모델보다 덜 자연스러울 수 있다.
+- 미리보기는 1280px에서 계산한다. 축소 후 보정이라 저장본과 반올림 수준 차이가 있다. 대신 휴대폰에서도 프레임마다 반응한다.
+- 40장을 순서대로 연다(몇 초). 대신 메모리가 묶이고 동시성 코드가 없다.
+- `main.ts` 는 모듈 수준 상태다. 목록 하나, 선택 하나라 store 계층은 전달만 하는 층이 된다.
+- `STATIC_LABELS` 의 id가 `index.html` 과 어긋나면 컴파일러는 못 잡는다. 대신 첫 화면을 띄우는 순간 `getElementById` 가 null이라 바로 깨진다.
+- 초기화 버튼은 보정 네 값만 되돌리고 회전·반전은 둔다.
+
+## 고려한 대안
+
+- **이미지마다 전체 해상도 픽셀을 들고 픽셀 단계로 자르기.** 다시 디코딩할 일은 없지만 40장에 약 470 MB이고, 어느 한 경로에서 자르기를 빠뜨릴 수 있다.
+- **미리보기만 별도 경로(CSS 회전 + 캔버스 `filter`), 저장 때만 픽셀 연산.** 빨리 만들 수 있지만 같은 일을 두 구현이 해 어긋난다. `filter` 에는 색온도도 없다.
+- **단계별 모듈(`load`, `detect`, `crop`, `rotate`, `adjust`, `export`).** 순서도처럼 읽히지만 시간 순 분해다. 픽셀 불변식과 자르기 영역이 다섯 경계를 넘고 호출자가 단계를 조율해야 한다.
+- **WebGL 셰이더로 보정.** 미리보기는 빨라지지만 저장용 읽기 경로가 하나 더 생기고 정밀도·컨텍스트 손실을 다뤄야 한다. 2~3 MP에는 필요 없다.
+
+## 테스트 계획
+
+테스트 경계는 두 곳이다. 둘 다 사용자가 관찰할 수 있는 결과만 확인하고, 내부 함수(`classify`, `withXmp` 등)는 직접 부르지 않는다. 테스트 샘플은 테스트 안에서 합성하고, 저장소에 실제 프린트를 넣지 않는다.
+
+**경계 1: 파일 → 저장 PNG (`openSource` + `exportSource`, vitest 브라우저 모드, Playwright Chromium).**
+합성 샘플은 흰 여백과 XMP iTXt 청크를 가진 2048x1440 PNG다. 사진 영역은 픽셀값이 모두 다르게 채운다.
+
+- 합성 프린트를 저장하면 1920x1080이고, 원본 (64,69) 영역과 픽셀이 같다. 파일 이름은 `_crop.png` 다.
+- 여백 띠 안의 픽셀 하나라도 흰색이 아니면 자르지 않는다. 띠 모서리 네 곳에서 확인한다. 이때 파일 이름은 `_edit.png` 다.
+- 캡션 영역이 검어도 프린트로 자른다.
+- 1920x1080과 1080x1920 이미지는 그대로 저장한다.
+- 저장한 PNG에서 XMP 청크가 원본과 바이트까지 같다. XMP가 없는 입력은 XMP 없이 저장된다.
+- 오른쪽으로 한 번 회전한 편집으로 저장하면 1080x1920이다.
+- `a.b.PNG` → `a.b_crop.png`, `noext` → `noext_crop.png`, `image.jpg`(사진) → `image_edit.png`.
+- 이미지가 아닌 파일은 `openSource` 가 거부한다.
+
+**경계 2: 편집 적용 (`render`, node).** 조합이 많아 브라우저보다 node에서 빠르게 돈다.
+
+- `IDENTITY_EDIT` 는 바이트가 같다.
+- 길이 4 이하의 모든 버튼 순서가 단순 회전·반전 함수를 차례로 적용한 결과와 같다(3x2, 픽셀값이 모두 다른 이미지).
+- 알파는 바뀌지 않는다.
+- 각 슬라이더 0은 그대로다.
+- 밝기는 0과 255를 유지한다.
+- 채도 -100이면 R=G=B다.
+- 색온도 +100이면 회색의 R이 오르고 B가 내린다.
+- 슬라이더 값은 [-100, 100]으로 잘린다.
+- 초기화는 방향을 유지한다.
+
+**테스트로 잡지 않는 것.** 언어 선택(`pickLocale`)과 화면 연결은 배포본을 열어 직접 확인한다.
+
+**배포 전 수동 검증.** 실제 프린트 몇 장을 저장해 두 가지를 비교한다.
+
+- 원본 (64,69) 1920x1080 영역과 픽셀이 같은지
+- XMP가 원본과 바이트까지 같은지
+
+## 구현 반영
+
+아직 없음.
+
+## 열린 질문과 위험
+
+- VRChat PNG가 16비트이거나 ICC·gAMA 청크를 갖는 경우가 있을까? 캔버스는 8비트로 줄인다. 확인한 37장은 IHDR, iTXt, IDAT, IEND뿐이었다.
+- 데스크톱 큰 화면에서 미리보기 1280px이 충분할까, 아니면 `devicePixelRatio` 에 맞춰야 할까?
+- 대비(2^(1.5k))와 색온도(±20% 이득) 상수는 실제 프린트로 한 번 맞춰 본 뒤 테스트로 고정해야 한다.
+- 8K 같은 큰 일반 사진은 "수 메가픽셀" 가정을 넘는다. iOS 캔버스 한도에 걸릴 수 있다.
+
+## 다음 구현 단계
+
+`edit.ts` 의 `render`, 전이 함수, `compileColor` 를 단순 참조 구현과 비교하는 테스트부터 짠다. 화면의 모든 픽셀이 여기를 지나기 때문이다.

@@ -1,0 +1,25 @@
+import type { Dict } from "./ko";
+
+export const en: Dict = {
+  languageName: "English",
+  appTitle: "VRChat Print Cropper",
+  language: "Language",
+  openFiles: "Open images",
+  dropHint: "Drop images here",
+  privacyNote: "Everything runs in your browser. Nothing is uploaded.",
+  emptyList: "No images open",
+  noSelection: "Pick an image from the list",
+  kind_print: "Print",
+  kind_photo: "Photo",
+  rotateLeft: "Rotate left",
+  rotateRight: "Rotate right",
+  flipHorizontal: "Flip horizontal",
+  adjust_brightness: "Brightness",
+  adjust_contrast: "Contrast",
+  adjust_saturation: "Saturation",
+  adjust_temperature: "Temperature",
+  reset: "Reset",
+  save: "Save",
+  loadFailed: "Could not open {name}",
+  saveFailed: "Could not save {name}",
+};

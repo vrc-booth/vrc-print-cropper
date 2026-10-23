@@ -1,0 +1,25 @@
+import type { Dict } from "./ko";
+
+export const zhHant: Dict = {
+  languageName: "繁體中文",
+  appTitle: "VRChat 列印照片裁切",
+  language: "語言",
+  openFiles: "開啟圖片",
+  dropHint: "將圖片拖放到這裡",
+  privacyNote: "所有處理都在瀏覽器中完成，不會上傳任何內容。",
+  emptyList: "沒有開啟的圖片",
+  noSelection: "請從清單中選擇圖片",
+  kind_print: "列印照片",
+  kind_photo: "照片",
+  rotateLeft: "向左旋轉",
+  rotateRight: "向右旋轉",
+  flipHorizontal: "水平翻轉",
+  adjust_brightness: "亮度",
+  adjust_contrast: "對比",
+  adjust_saturation: "飽和度",
+  adjust_temperature: "色溫",
+  reset: "重設",
+  save: "儲存",
+  loadFailed: "無法開啟 {name}",
+  saveFailed: "無法儲存 {name}",
+};

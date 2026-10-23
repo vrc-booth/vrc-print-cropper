@@ -1,0 +1,25 @@
+import type { Dict } from "./ko";
+
+export const ja: Dict = {
+  languageName: "日本語",
+  appTitle: "VRChat プリント切り抜き",
+  language: "言語",
+  openFiles: "画像を開く",
+  dropHint: "ここに画像をドロップ",
+  privacyNote: "処理はすべてブラウザ内で行われ、何もアップロードされません。",
+  emptyList: "開いている画像はありません",
+  noSelection: "リストから画像を選んでください",
+  kind_print: "プリント",
+  kind_photo: "写真",
+  rotateLeft: "左に回転",
+  rotateRight: "右に回転",
+  flipHorizontal: "左右反転",
+  adjust_brightness: "明るさ",
+  adjust_contrast: "コントラスト",
+  adjust_saturation: "彩度",
+  adjust_temperature: "色温度",
+  reset: "リセット",
+  save: "保存",
+  loadFailed: "{name} を開けませんでした",
+  saveFailed: "{name} を保存できませんでした",
+};

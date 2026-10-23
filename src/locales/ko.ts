@@ -1,0 +1,25 @@
+export const ko = {
+  languageName: "한국어",
+  appTitle: "VRChat 프린트 자르기",
+  language: "언어",
+  openFiles: "이미지 열기",
+  dropHint: "이미지를 여기에 끌어다 놓으세요",
+  privacyNote: "모든 처리는 브라우저 안에서 이루어지며, 아무것도 업로드되지 않습니다.",
+  emptyList: "열린 이미지가 없습니다",
+  noSelection: "목록에서 이미지를 고르세요",
+  kind_print: "프린트",
+  kind_photo: "사진",
+  rotateLeft: "왼쪽으로 회전",
+  rotateRight: "오른쪽으로 회전",
+  flipHorizontal: "좌우 반전",
+  adjust_brightness: "밝기",
+  adjust_contrast: "대비",
+  adjust_saturation: "채도",
+  adjust_temperature: "색온도",
+  reset: "초기화",
+  save: "저장",
+  loadFailed: "{name}을(를) 열 수 없습니다",
+  saveFailed: "{name}을(를) 저장하지 못했습니다",
+};
+
+export type Dict = Record<keyof typeof ko, string>;
