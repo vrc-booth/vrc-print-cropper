@@ -24,20 +24,24 @@ export const PREVIEW_SIDE = 1280;
  * Rejects when the browser cannot decode the file; the caller shows that per file.
  */
 export async function openSource(file: File): Promise<{ source: Source; thumb: Pixels }> {
-  // TODO:
-  //   const xmp = findXmpChunk(new Uint8Array(await file.arrayBuffer()))
-  //   const bitmap = await decode(file)
-  //   try {
-  //     const { kind, rect } = classify(readPixels(bitmap, fullRect(bitmap)))
-  //     const source = { file, kind, rect, xmp }
-  //     return { source, thumb: readPixels(bitmap, rect, THUMB_SIDE) }
-  //   } finally { bitmap.close() }
-  throw new Error("not implemented");
+  const xmp = findXmpChunk(new Uint8Array(await file.arrayBuffer()));
+  const bitmap = await decode(file);
+  try {
+    const { kind, rect } = classify(bitmap.width, bitmap.height, () => readPixels(bitmap, fullRect(bitmap)));
+    return { source: { file, kind, rect, xmp }, thumb: readPixels(bitmap, rect, THUMB_SIDE) };
+  } finally {
+    bitmap.close();
+  }
 }
 
 /** The photo region (crop already applied), scaled down so its long side <= maxSide. Never upscales. */
 export async function readSource(source: Source, maxSide = Infinity): Promise<Pixels> {
-  throw new Error("not implemented");
+  const bitmap = await decode(source.file);
+  try {
+    return readPixels(bitmap, source.rect, maxSide);
+  } finally {
+    bitmap.close();
+  }
 }
 
 /**
@@ -45,26 +49,25 @@ export async function readSource(source: Source, maxSide = Infinity): Promise<Pi
  * Same `render` as the preview; only the input size differs.
  */
 export async function exportSource(source: Source, edit: Edit): Promise<{ name: string; blob: Blob }> {
-  // TODO:
-  //   const out = render(await readSource(source), edit)
-  //   let bytes = await encodePng(out)
-  //   if (source.xmp) bytes = withXmp(bytes, source.xmp)
-  //   return { name: outputName(source.file.name, source.kind), blob: new Blob([bytes], { type: "image/png" }) }
-  throw new Error("not implemented");
+  const out = render(await readSource(source), edit);
+  let bytes = await encodePng(out);
+  if (source.xmp) bytes = withXmp(bytes, source.xmp);
+  return { name: outputName(source.file.name, source.kind), blob: new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "image/png" }) };
 }
 
 function decode(file: Blob): Promise<ImageBitmap> {
-  // TODO: createImageBitmap(file, { colorSpaceConversion: "none", premultiplyAlpha: "none" })
   // "none" keeps opaque 8-bit pixels byte-exact through the canvas round trip.
-  throw new Error("not implemented");
+  return createImageBitmap(file, { colorSpaceConversion: "none", premultiplyAlpha: "none" });
 }
 
 function readPixels(bitmap: ImageBitmap, rect: Rect, maxSide = Infinity): Pixels {
-  // TODO: scale = min(1, maxSide / max(rect.width, rect.height)); canvas sized round(rect * scale);
-  // ctx = getContext("2d", { willReadFrequently: true }); imageSmoothingQuality = "high";
-  // drawImage(bitmap, rect.x, rect.y, rect.width, rect.height, 0, 0, w, h); return getImageData(...)
-  // At scale 1 this is an exact copy, so this is also the crop.
-  throw new Error("not implemented");
+  const scale = Math.min(1, maxSide / Math.max(rect.width, rect.height));
+  const width = Math.max(1, Math.round(rect.width * scale));
+  const height = Math.max(1, Math.round(rect.height * scale));
+  const context = context2d(new OffscreenCanvas(width, height), { willReadFrequently: true });
+  context.imageSmoothingQuality = "high";
+  context.drawImage(bitmap, rect.x, rect.y, rect.width, rect.height, 0, 0, width, height);
+  return context.getImageData(0, 0, width, height);
 }
 
 function fullRect(bitmap: ImageBitmap): Rect {
@@ -72,6 +75,14 @@ function fullRect(bitmap: ImageBitmap): Rect {
 }
 
 function encodePng(px: Pixels): Promise<Uint8Array> {
-  // TODO: canvas.toBlob("image/png") -> arrayBuffer -> Uint8Array; reject on null blob
-  throw new Error("not implemented");
+  const canvas = new OffscreenCanvas(px.width, px.height);
+  const context = context2d(canvas);
+  context.putImageData(new ImageData(px.data, px.width, px.height), 0, 0);
+  return canvas.convertToBlob({ type: "image/png" }).then(async (blob) => new Uint8Array(await blob.arrayBuffer()));
+}
+
+function context2d(canvas: OffscreenCanvas, options?: CanvasRenderingContext2DSettings): OffscreenCanvasRenderingContext2D {
+  const context = canvas.getContext("2d", options);
+  if (!context) throw new Error("2D canvas unavailable");
+  return context;
 }

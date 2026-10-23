@@ -3,28 +3,38 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
     <title>VRChat Print Cropper</title>
   </head>
   <body>
-    <header>
+    <header class="bar">
       <h1 id="app-title"></h1>
-      <label><span id="language-label"></span> <select id="locale"></select></label>
+      <label class="language"><span id="language-label"></span> <select id="locale"></select></label>
     </header>
-    <main>
-      <aside id="list-pane">
-        <label class="open"><span id="open-label"></span><input id="files" type="file" accept="image/*" multiple hidden /></label>
-        <p id="drop-hint"></p>
-        <ul id="list"></ul>
-        <p id="list-empty"></p>
+    <main class="layout">
+      <aside class="pane list-pane">
+        <button id="open" class="open" type="button"><span id="open-label"></span><span id="drop-hint" class="hint"></span></button>
+        <input id="files" type="file" accept="image/*" multiple hidden />
+        <ul id="list" class="list"></ul>
+        <p id="list-empty" class="hint"></p>
       </aside>
-      <section id="editor">
-        <canvas id="preview" role="img"></canvas>
-        <p id="no-selection"></p>
-        <div id="controls"></div>
+      <section class="editor">
+        <div class="stage">
+          <canvas id="preview" role="img" hidden></canvas>
+          <p id="no-selection" class="hint"></p>
+        </div>
+        <div id="orient" class="orient"></div>
+      </section>
+      <section class="pane adjust-pane">
+        <h2 id="adjust-title"></h2>
+        <div id="sliders" class="sliders"></div>
+        <button id="reset" type="button"></button>
+        <div class="spacer"></div>
+        <button id="save" class="primary" type="button"></button>
       </section>
     </main>
-    <p id="status" aria-live="polite"></p>
-    <footer><p id="privacy-note"></p></footer>
+    <div id="status" class="status" aria-live="polite"></div>
+    <footer class="bar"><p id="privacy-note"></p></footer>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

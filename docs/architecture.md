@@ -23,8 +23,8 @@
 // main.ts: 열기, 편집, 저장
 const { source, thumb } = await openSource(file);                  // 한 번 디코딩, 판별, XMP 보관, 썸네일
 draw(rowCanvas, render(thumb, item.edit));                         // 썸네일·미리보기·저장이 같은 render
-updateEdit(id, (e) => setAdjust(e, "contrast", Number(input.value)));
-updateEdit(id, rotateRight);
+updateEdit((e) => setAdjust(e, "contrast", Number(input.value))); // 선택된 이미지에 적용
+updateEdit(rotateRight);
 const { name, blob } = await exportSource(item.source, item.edit); // 전체 해상도 + XMP + 파일 이름
 ```
 
@@ -35,12 +35,6 @@ expect(render(src, edit)).toEqual(naiveFlipH(naiveRotateCW(src)));
 expect(render(src, IDENTITY_EDIT).data).toEqual(src.data);
 ```
 
-```ts
-// png.test.ts
-const xmp = findXmpChunk(syntheticPng({ withXmp: "<x:xmpmeta/>" }))!;
-expect(findXmpChunk(withXmp(canvasLikePng(), xmp))).toEqual(xmp);
-```
-
 ## 구조
 
 | 파일 | 맡는 것 | DOM |
@@ -49,7 +43,7 @@ expect(findXmpChunk(withXmp(canvasLikePng(), xmp))).toEqual(xmp);
 | `src/print.ts` | 프린트 규격, `classify`, `outputName` | 없음 |
 | `src/png.ts` | `XmpChunk` 브랜드, `findXmpChunk`, `withXmp` | 없음 |
 | `src/source.ts` | `openSource`, `readSource`, `exportSource` | 있음 |
-| `src/i18n.ts` + `src/locales/*.ts` | 현재 언어, `pickLocale`, `t`, `label` | `setLocale`, `label` 만 |
+| `src/i18n.ts` + `src/locales/*.ts` | 현재 언어, `pickLocale`, `t`, `label`, `accessibleName` | `setLocale`, `label`, `accessibleName` 만 |
 | `src/main.ts` | 목록, 선택, 미리보기 캐시, DOM 연결 | 있음 |
 
 **데이터.**
@@ -75,14 +69,14 @@ File ─openSource─► Source{kind,rect,xmp} + thumb(240px)       [한 번 디
 3. **`source.ts` 가 깊은 모듈이다.** 세 함수 뒤에 `colorSpaceConversion: "none"`·`premultiplyAlpha: "none"` 디코딩, 캔버스 읽기, 자르기, 축소, PNG 인코딩, XMP 끼우기, 이름 짓기를 숨긴다. ESLint `no-restricted-imports` 로 `print.ts` 와 `png.ts` 는 `source.ts` 만 가져오게 막는다(importable-internals). ESLint는 접근 제어자 규칙 때문에 어차피 들어간다.
 4. **XMP는 청크 통째로 옮긴다.** `findXmpChunk` 는 길이·타입·데이터·CRC를 그대로 잘라 `XmpChunk` 로 표시한다. `withXmp` 는 그 청크를 오프셋 33(IHDR 바로 뒤)에 넣고, 이미 있는 XMP는 먼저 지워 두 번 넣어도 결과가 같다. `findXmpChunk` 는 사용자 파일을 받는 신뢰 경계라서 잘못된 입력에 예외 대신 null을 돌려준다. `withXmp` 의 입력은 우리가 만든 캔버스 출력이므로 모양이 틀리면 버그로 보고 예외를 던진다(boundary-discipline).
 5. **목록은 한 곳에만 둔다.** 슬라이더는 `ADJUST_KEYS`, 회전 버튼은 `ORIENT_ACTIONS`, 언어는 `DICTIONARIES` 에서 만든다. 다른 언어 사전은 `Dict` 타입이라 키가 빠지거나 남으면 타입 오류다. 프린트 여백 띠 `MARGIN_STRIPS` 는 `PRINT_PHOTO` 에서 계산하므로 판별과 자르기가 같은 상수를 본다.
-6. **화면 글자는 `label(el, key)` 하나로 넣는다.** `index.html` 에는 메시지 키가 없고 `id` 만 있다. `main.ts` 의 `STATIC_LABELS` 가 id와 키를 잇는다. 언어를 바꾸면 `data-i18n` 이 붙은 요소를 한 번에 다시 채운다.
+6. **화면 글자는 `label(el, key)` 로 넣는다.** 글자가 없는 아이콘 버튼과 미리보기 캔버스는 `accessibleName(el, key)` 로 `aria-label` 과 `title` 을 채운다. `index.html` 에는 메시지 키가 없고 `id` 만 있다. `main.ts` 의 `STATIC_LABELS` 가 id와 키를 잇는다. 언어를 바꾸면 `data-i18n` 이 붙은 요소를 한 번에 다시 채운다.
 7. **잠금 없이 비동기를 다룬다.** 파일은 순서대로 열어 한 번에 디코딩 한 장만 메모리에 둔다. 선택이 바뀐 뒤 늦게 끝난 디코딩은 버린다. 저장은 시작할 때 `edit` 을 복사해 두고 쓴다.
 
 검증은 세 경계에 있다. `setAdjust` 는 슬라이더 값을 [-100, 100]으로 자르고 반올림한다(NaN은 0). `pickLocale` 은 저장된 값이 유효한 언어일 때만 받는다. `findXmpChunk` 는 파일 바이트를 검사한다. 경계 안쪽은 타입을 믿는다.
 
 **하지 않는 것.** 실행 취소, 목록에서 지우기, 새로고침 뒤 편집 유지, Worker, 선형 색공간 연산, ICC 처리, ZIP, 전체 적용, 자유 각도 회전, 수동 자르기.
 
-**인터페이스 깊이.** UI가 아는 것은 `openSource`, `readSource`, `exportSource`, `render`, 다섯 개의 `Edit` 전이 함수, `t`/`label`/`setLocale` 이다. 그 뒤에 프린트 규격, 청크 탐색, 디코딩 옵션, 축소, 색 연산, 방향 대수가 숨는다.
+**인터페이스 깊이.** UI가 아는 것은 `openSource`, `readSource`, `exportSource`, `render`, 다섯 개의 `Edit` 전이 함수, `t`/`label`/`accessibleName`/`setLocale`/`storeLocale` 이다. 그 뒤에 프린트 규격, 청크 탐색, 디코딩 옵션, 축소, 색 연산, 방향 대수가 숨는다.
 
 ## 합성 결정
 
@@ -160,7 +154,19 @@ File ─openSource─► Source{kind,rect,xmp} + thumb(240px)       [한 번 디
 
 ## 구현 반영
 
-아직 없음.
+- `updateEdit(id, change)` 를 `updateEdit(change)` 로 줄였다. 편집을 바꾸는 호출자는 모두 선택된 이미지를 고친다. 썸네일과 미리보기를 다시 그리는 길은 여전히 이것 하나다.
+- 아이콘 버튼은 보이는 글자가 없어서 `i18n.ts` 에 `accessibleName(el, key)` 를 더했다. 언어를 바꾸면 `label` 과 함께 다시 채운다.
+- `setLocale` 은 저장하지 않는다. 사용자가 언어를 고를 때만 `storeLocale` 로 저장한다. 첫 방문에 추측한 언어가 저장되면 브라우저 언어를 바꿔도 따라가지 않기 때문이다.
+- `classify(width, height, readPixels)` 는 크기가 프린트와 같을 때만 픽셀을 읽는다. 큰 일반 사진을 판별하려고 통째로 복사하지 않는다.
+- 여러 번 끌어다 놓아도 열기는 앞의 열기가 끝난 뒤에 시작한다(`opening` 사슬). 디코딩은 언제나 한 장이다.
+- 상태줄은 메시지마다 새 줄을 더한다. 같은 메시지가 반복돼도 스크린리더가 다시 읽고, 여러 파일의 실패가 모두 남는다. 상태줄은 비어 있어도 접근성 트리에 남도록 숨기지 않는다.
+- 선택을 바꾸면 새 미리보기가 준비될 때까지 이전 미리보기를 숨긴다.
+- 사전에 `preview`(미리보기 캔버스 이름)와 `adjustments`(보정 패널 제목) 키를 더했다. 저장 버튼 문구는 [디자인 규칙](design.md)의 시안대로 "PNG로 저장"이다.
+- 캔버스는 `OffscreenCanvas` 를 쓴다. 디코딩·읽기·인코딩이 DOM 요소를 만들지 않는다.
+- 내려받기 링크의 객체 URL은 10초 뒤에 해제한다. `click()` 직후에 해제하면 일부 브라우저에서 내려받기가 취소된다.
+- 파일 열기는 `<button>` 이 숨긴 `<input type="file">` 을 누른다. `<label>` 은 키보드로 초점을 받지 못한다.
+- TypeScript는 6.0으로 고정했다. typescript-eslint 8.72가 6.1 미만만 지원한다.
+- CI에 `pnpm run lint` 단계를 더했다. 접근 제어자와 가져오기 제한 규칙이 린트에만 있기 때문이다. 손으로 다시 배포할 수 있게 `workflow_dispatch` 도 켰다.
 
 ## 열린 질문과 위험
 
@@ -171,4 +177,5 @@ File ─openSource─► Source{kind,rect,xmp} + thumb(240px)       [한 번 디
 
 ## 다음 구현 단계
 
-`edit.ts` 의 `render`, 전이 함수, `compileColor` 를 단순 참조 구현과 비교하는 테스트부터 짠다. 화면의 모든 픽셀이 여기를 지나기 때문이다.
+- 배포본에서 다섯 언어와 언어 기억을 확인한다.
+- 실제 프린트로 배포 전 수동 검증을 하고, 대비·색온도 상수를 맞춘다.
