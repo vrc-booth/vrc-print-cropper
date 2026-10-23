@@ -114,6 +114,18 @@ describe("open and export", () => {
     expect([saved.image.width, saved.image.height]).toEqual([2048, 1440]);
   });
 
+  it("still crops a print whose photo bleeds one pixel into the margin", async () => {
+    const original = print();
+    for (let x = PHOTO.x; x < PHOTO.x + PHOTO.width; x += 7) original.data.set([128, 128, 128], ((PHOTO.y - 1) * 2048 + x) * 4);
+    for (let y = PHOTO.y; y < PHOTO.y + PHOTO.height; y += 7) {
+      original.data.set([128, 128, 128], (y * 2048 + PHOTO.x - 1) * 4);
+      original.data.set([128, 128, 128], (y * 2048 + PHOTO.x + PHOTO.width) * 4);
+    }
+    const saved = await save(await encode(original), "bleed.png");
+    expect(saved.name).toBe("bleed_crop.png");
+    expect(crop(saved.image, { x: 0, y: 0, width: 1920, height: 1080 })).toEqual(crop(original, PHOTO));
+  });
+
   it("still crops a print whose caption is black", async () => {
     const original = print();
     for (let y = PHOTO.y + PHOTO.height; y < 1440; y++) {

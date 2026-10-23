@@ -7,14 +7,17 @@ const PRINT_HEIGHT = 1440;
 /** Measured on 37 real prints. */
 const PRINT_PHOTO: Rect = { x: 64, y: 69, width: 1920, height: 1080 };
 
+/** Pixels next to the photo that VRChat sometimes tints when it draws the photo; measured up to 1 on real prints. */
+const BLEED = 1;
+
 /** Derived from PRINT_PHOTO so detection and crop cannot disagree. The caption rows below the photo are excluded. */
 const MARGIN_STRIPS: readonly Rect[] = [
-  { x: 0, y: 0, width: PRINT_WIDTH, height: PRINT_PHOTO.y },
-  { x: 0, y: PRINT_PHOTO.y, width: PRINT_PHOTO.x, height: PRINT_PHOTO.height },
+  { x: 0, y: 0, width: PRINT_WIDTH, height: PRINT_PHOTO.y - BLEED },
+  { x: 0, y: PRINT_PHOTO.y, width: PRINT_PHOTO.x - BLEED, height: PRINT_PHOTO.height },
   {
-    x: PRINT_PHOTO.x + PRINT_PHOTO.width,
+    x: PRINT_PHOTO.x + PRINT_PHOTO.width + BLEED,
     y: PRINT_PHOTO.y,
-    width: PRINT_WIDTH - PRINT_PHOTO.x - PRINT_PHOTO.width,
+    width: PRINT_WIDTH - PRINT_PHOTO.x - PRINT_PHOTO.width - BLEED,
     height: PRINT_PHOTO.height,
   },
 ];
