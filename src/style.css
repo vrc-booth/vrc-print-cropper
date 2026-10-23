@@ -36,6 +36,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -252,7 +256,7 @@ h1 {
 .stage canvas {
   display: block;
   max-width: 100%;
-  max-height: calc(100vh - 240px);
+  max-height: calc(100vh - 320px);
   width: auto;
   height: auto;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
