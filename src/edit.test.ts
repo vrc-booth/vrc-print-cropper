@@ -359,6 +359,25 @@ describe("automatic layers", () => {
     expect(photoHues(image(3, 1, (i) => [[128, 128, 128, 255], [40, 10, 10, 255], [250, 240, 240, 255]][i] as Px))).toEqual([]);
   });
 
+  it("never picks skin as a hue, but counts it toward all color", () => {
+    const skin: Px = [250, 200, 180, 255];
+    expect(photoHues(image(10, 1, () => skin))).toEqual([]);
+    const portrait = image(10, 1, (i) => (i < 9 ? skin : [40, 80, 230, 255]));
+    const [blue] = photoHues(portrait);
+    expect(blue.share).toBeLessThan(0.5);
+    expect(autoLayers(IDENTITY_EDIT, portrait).layers.map((layer) => layer.mode)).not.toContain("softLight");
+  });
+
+  it("still picks saturated red and orange light", () => {
+    expect(photoHues(image(10, 1, () => [240, 60, 20, 255]))).toHaveLength(1);
+  });
+
+  it("deepens a photo whose only color is skin with gray, not a warm tint", () => {
+    const burn = autoLayers(IDENTITY_EDIT, image(10, 1, () => [230, 210, 200, 255])).layers.find((layer) => layer.mode === "colorBurn");
+    expect(burn).toBeDefined();
+    expect(new Set(burn!.color).size).toBe(1);
+  });
+
   it("adds nothing to a photo that needs nothing", () => {
     expect(autoLayers(IDENTITY_EDIT, balanced).layers).toEqual([]);
   });
