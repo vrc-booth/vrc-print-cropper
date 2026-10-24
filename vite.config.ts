@@ -1,8 +1,10 @@
+import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   base: "/vrc-print-cropper/",
+  plugins: [svelte()],
   test: {
     projects: [
       {

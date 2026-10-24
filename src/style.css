@@ -347,7 +347,7 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 8px;
+  padding: 6px 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg);
@@ -356,19 +356,22 @@ h2 {
 .layer-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
 
+/* Card controls are 36px: two rows per layer keep a stack short, and 36px clears the 24px target minimum (WCAG 2.5.8). */
 .layer select {
   flex: 1;
   min-width: 0;
+  min-height: 36px;
+  margin-left: 4px;
 }
 
 .layer input[type="color"] {
   flex: none;
-  width: 44px;
-  height: 44px;
-  padding: 4px;
+  width: 36px;
+  height: 36px;
+  padding: 3px;
   border-radius: 6px;
   border: 1px solid var(--line-strong);
   background: var(--panel);
@@ -378,13 +381,13 @@ h2 {
 .layer input[type="range"] {
   flex: 1;
   min-width: 0;
-  min-height: 44px;
+  height: 36px;
   margin: 0;
   accent-color: var(--accent);
 }
 
 .layer output {
-  min-width: 40px;
+  min-width: 36px;
   text-align: right;
   color: var(--muted);
   font-size: 13px;
@@ -392,6 +395,8 @@ h2 {
 }
 
 .layer .icon {
+  min-width: 36px;
+  min-height: 36px;
   border-color: transparent;
   background: transparent;
   color: var(--muted);
@@ -403,7 +408,7 @@ h2 {
 }
 
 .section-head button,
-#reset {
+.panel-actions .secondary {
   background: transparent;
 }
 

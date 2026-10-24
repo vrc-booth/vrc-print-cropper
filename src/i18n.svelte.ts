@@ -13,7 +13,8 @@ export const LOCALES = Object.keys(DICTIONARIES) as Locale[];
 
 const STORAGE_KEY = "vrc-print-cropper.locale";
 
-let current: Locale = "en";
+/** The UI language. Anything reading it through `t` re-renders when it changes. */
+export const i18n = $state({ locale: "en" as Locale });
 
 function isLocale(value: string | null): value is Locale {
   return value !== null && Object.hasOwn(DICTIONARIES, value);
@@ -54,17 +55,6 @@ export function storeLocale(locale: Locale): void {
   } catch {}
 }
 
-/** Sets the current locale, updates <html lang>, and re-labels `root`. */
-export function setLocale(locale: Locale, root: ParentNode = document): void {
-  current = locale;
-  document.documentElement.lang = locale;
-  relabel(root);
-}
-
-export function getLocale(): Locale {
-  return current;
-}
-
 type Params = Readonly<Record<string, string>>;
 
 /** Pure lookup. "{name}" placeholders come from params; unknown ones stay as-is. */
@@ -73,25 +63,5 @@ export function translate(locale: Locale, key: MessageKey, params?: Params): str
 }
 
 export function t(key: MessageKey, params?: Params): string {
-  return translate(current, key, params);
-}
-
-/** Marks an element as translatable and fills its text now. The only way any element gets UI text. */
-export function label<E extends HTMLElement>(el: E, key: MessageKey): E {
-  el.dataset.i18n = key;
-  el.textContent = t(key);
-  return el;
-}
-
-/** Like `label`, for elements without visible text: sets aria-label and title instead. */
-export function accessibleName<E extends Element>(el: E, key: MessageKey): E {
-  el.setAttribute("data-i18n-name", key);
-  el.setAttribute("aria-label", t(key));
-  el.setAttribute("title", t(key));
-  return el;
-}
-
-function relabel(root: ParentNode): void {
-  for (const el of root.querySelectorAll<HTMLElement>("[data-i18n]")) label(el, el.dataset.i18n as MessageKey);
-  for (const el of root.querySelectorAll("[data-i18n-name]")) accessibleName(el, el.getAttribute("data-i18n-name") as MessageKey);
+  return translate(i18n.locale, key, params);
 }

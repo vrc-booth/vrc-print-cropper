@@ -15,14 +15,14 @@
 
 사용자가 읽는 설명:
 
-> VRChat 프린트나 사진을 끌어다 놓거나 "이미지 열기"를 누르세요. 프린트는 흰 프레임과 캡션이 자동으로 잘리고, 다른 이미지는 그대로 둡니다. 여러 장을 열었다면 아래 썸네일 줄에서 이미지를 고르고, 회전·반전하거나 보정 슬라이더를 움직이고, 필요하면 색 레이어를 얹은 뒤 저장하세요. "자동 보정"을 누르면 보정 슬라이더 값이 사진에 맞게 채워집니다. 프린트는 `<이름>_crop.png`, 그 밖의 이미지는 `<이름>_edit.png` 로 저장됩니다. VRChat 메타데이터(월드, 촬영자, 날짜)는 파일에 남습니다. 아무것도 업로드되지 않습니다.
+> VRChat 프린트나 사진을 끌어다 놓거나 "이미지 열기"를 누르세요. 프린트는 흰 프레임과 캡션이 자동으로 잘리고, 다른 이미지는 그대로 둡니다. 여러 장을 열었다면 아래 썸네일 줄에서 이미지를 고르고, 회전·반전하거나 보정 슬라이더를 움직이고, 필요하면 "레이어 추가"로 사진에 맞는 색 레이어를 얹은 뒤 저장하세요. "자동 보정"을 누르면 보정 슬라이더 값이 사진에 맞게 채워집니다. 프린트는 `<이름>_crop.png`, 그 밖의 이미지는 `<이름>_edit.png` 로 저장됩니다. VRChat 메타데이터(월드, 촬영자, 날짜)는 파일에 남습니다. 아무것도 업로드되지 않습니다.
 
 코드 안의 호출 지점:
 
 ```ts
-// main.ts: 열기, 편집, 저장
+// App.svelte: 열기, 편집, 저장
 const { source, thumb } = await openSource(file);                  // 한 번 디코딩, 판별, XMP 보관, 썸네일
-draw(rowCanvas, render(thumb, item.edit));                         // 썸네일·미리보기·저장이 같은 render
+draw(thumbCanvas, render(item.thumb, item.edit));                  // 썸네일·미리보기·저장이 같은 render
 updateEdit((e) => setAdjust(e, "contrast", Number(input.value))); // 선택된 이미지에 적용
 updateEdit(rotateRight);
 const { name, blob } = await exportSource(item.source, item.edit); // 전체 해상도 + XMP + 파일 이름
@@ -43,14 +43,16 @@ expect(render(src, IDENTITY_EDIT).data).toEqual(src.data);
 | `src/print.ts` | 프린트 규격, `classify`, `outputName` | 없음 |
 | `src/png.ts` | `XmpChunk` 브랜드, `findXmpChunk`, `withXmp` | 없음 |
 | `src/source.ts` | `openSource`, `readSource`, `exportSource` | 있음 |
-| `src/i18n.ts` + `src/locales/*.ts` | 현재 언어, `pickLocale`, `t`, `label`, `accessibleName` | `setLocale`, `label`, `accessibleName` 만 |
-| `src/main.ts` | 열린 이미지와 썸네일 줄, 선택, 미리보기 캐시, DOM 연결 | 있음 |
+| `src/i18n.svelte.ts` + `src/locales/*.ts` | 현재 언어(`i18n.locale`, `$state`), `pickLocale`, `t` | 없음 |
+| `src/App.svelte` | 열린 이미지와 썸네일 줄, 선택, 미리보기 캐시, 열기·저장 | 있음 |
+| `src/AdjustPanel.svelte`, `src/LayerCard.svelte`, `src/Icon.svelte` | 보정 패널, 레이어 카드 하나, 선 아이콘 | 있음 |
+| `src/main.ts` | `App` 을 `document.body` 에 띄운다 | 있음 |
 
 **데이터.**
 
 - `Edit = { orientation: { turns: 0|1|2|3, flip }, adjust: Record<AdjustKey, number> }` 는 불변 값이다. 방향은 D4 군의 원소라서 어떤 버튼 순서도 8가지 중 하나로 접힌다. 화면 기준 좌우 반전은 `turns = (4 - turns) % 4` 규칙 하나로 `flipHorizontal` 에만 있다(model-the-domain).
 - `Source = { file, kind, rect, xmp }` 는 `openSource` 가 한 번 만들고 바뀌지 않는다. `kind` 와 `rect` 는 같은 `classify` 호출에서 나오므로, 프린트인데 자르는 영역이 다른 상태는 생길 수 없다. 픽셀은 들고 있지 않다.
-- `Item = { id, source, thumb, edit, row }` 는 `main.ts` 에만 있다. `edit` 을 쓰는 곳은 `updateEdit` 하나다.
+- `Item = { id, source, thumb, edit }` 는 `App.svelte` 에만 있다. `items` 는 `$state.raw` 배열이고, `edit` 을 바꾸는 곳은 `updateEdit` 하나다. 바뀐 항목만 새 객체가 되므로 다른 썸네일은 다시 그리지 않는다.
 
 **흐름.**
 
@@ -69,14 +71,14 @@ File ─openSource─► Source{kind,rect,xmp} + thumb(240px)       [한 번 디
 3. **`source.ts` 가 깊은 모듈이다.** 세 함수 뒤에 `colorSpaceConversion: "none"`·`premultiplyAlpha: "none"` 디코딩, 캔버스 읽기, 자르기, 축소, PNG 인코딩, XMP 끼우기, 이름 짓기를 숨긴다. ESLint `no-restricted-imports` 로 `print.ts` 와 `png.ts` 는 `source.ts` 만 가져오게 막는다(importable-internals). ESLint는 접근 제어자 규칙 때문에 어차피 들어간다.
 4. **XMP는 청크 통째로 옮긴다.** `findXmpChunk` 는 길이·타입·데이터·CRC를 그대로 잘라 `XmpChunk` 로 표시한다. `withXmp` 는 그 청크를 오프셋 33(IHDR 바로 뒤)에 넣고, 이미 있는 XMP는 먼저 지워 두 번 넣어도 결과가 같다. `findXmpChunk` 는 사용자 파일을 받는 신뢰 경계라서 잘못된 입력에 예외 대신 null을 돌려준다. `withXmp` 의 입력은 우리가 만든 캔버스 출력이므로 모양이 틀리면 버그로 보고 예외를 던진다(boundary-discipline).
 5. **목록은 한 곳에만 둔다.** 슬라이더는 `ADJUST_KEYS`, 혼합 모드 선택과 그 계산식은 `BLEND_MODES`, 회전 버튼은 `ORIENT_ACTIONS`, 언어는 `DICTIONARIES` 에서 만든다. 다른 언어 사전은 `Dict` 타입이라 키가 빠지거나 남으면 타입 오류다. 프린트 여백 띠 `MARGIN_STRIPS` 는 `PRINT_PHOTO` 에서 계산하므로 판별과 자르기가 같은 상수를 본다.
-6. **화면 글자는 `label(el, key)` 로 넣는다.** 글자가 없는 아이콘 버튼과 미리보기 캔버스는 `accessibleName(el, key)` 로 `aria-label` 과 `title` 을 채운다. `index.html` 에는 메시지 키가 없고 `id` 만 있다. `main.ts` 의 `STATIC_LABELS` 가 id와 키를 잇는다. 언어를 바꾸면 `data-i18n` 이 붙은 요소를 한 번에 다시 채운다.
+6. **화면은 Svelte 5 컴포넌트다.** 화면 글자는 템플릿에서 `t(key)` 로 넣는다. `t` 는 `$state` 인 `i18n.locale` 을 읽으므로, 언어를 바꾸면 그 글자만 다시 그려진다. 글자가 없는 아이콘 버튼과 미리보기 캔버스는 `aria-label` 과 `title` 에 `t(key)` 를 쓴다. `index.html` 에는 화면 요소가 없다. 편집 규칙은 계속 DOM 없는 `edit.ts` 에 있고, 컴포넌트는 그 전이 함수를 부를 뿐이다.
 7. **잠금 없이 비동기를 다룬다.** 파일은 순서대로 열어 한 번에 디코딩 한 장만 메모리에 둔다. 선택이 바뀐 뒤 늦게 끝난 디코딩은 버린다. 저장은 시작할 때 `edit` 을 복사해 두고 쓴다.
 
 검증은 세 경계에 있다. `setAdjust` 는 슬라이더 값을 [-100, 100]으로 자르고 반올림한다(NaN은 0). `setLayerColor` 는 `#rrggbb` 만, `setLayerMode` 는 `BLEND_MODES` 의 키만 받고, `setLayerOpacity` 는 [0, 100]으로 자른다. `pickLocale` 은 저장된 값이 유효한 언어일 때만 받는다. `findXmpChunk` 는 파일 바이트를 검사한다. 경계 안쪽은 타입을 믿는다.
 
 **하지 않는 것.** 실행 취소, 목록에서 지우기, 새로고침 뒤 편집 유지, Worker, 선형 색공간 연산, ICC 처리, ZIP, 전체 적용, 자유 각도 회전, 수동 자르기.
 
-**인터페이스 깊이.** UI가 아는 것은 `openSource`, `readSource`, `exportSource`, `render`, 열두 개의 `Edit` 전이 함수, `t`/`label`/`accessibleName`/`setLocale`/`storeLocale` 이다. 그 뒤에 프린트 규격, 청크 탐색, 디코딩 옵션, 축소, 색 연산, 방향 대수가 숨는다.
+**인터페이스 깊이.** UI가 아는 것은 `openSource`, `readSource`, `exportSource`, `render`, 열두 개의 `Edit` 전이 함수, `i18n`/`t`/`pickLocale`/`storeLocale` 이다. 그 뒤에 프린트 규격, 청크 탐색, 디코딩 옵션, 축소, 색 연산, 방향 대수가 숨는다.
 
 ## 합성 결정
 
@@ -106,8 +108,7 @@ File ─openSource─► Source{kind,rect,xmp} + thumb(240px)       [한 번 디
 - 보정은 감마 인코딩된 sRGB에서 단순 곡선으로 계산한다. 대신 표 세 개로 한 번에 처리하고 테스트가 쉽다. 강한 색온도는 켈빈 모델보다 덜 자연스러울 수 있다.
 - 미리보기는 1280px에서 계산한다. 축소 후 보정이라 저장본과 반올림 수준 차이가 있다. 대신 휴대폰에서도 프레임마다 반응한다.
 - 40장을 순서대로 연다(몇 초). 대신 메모리가 묶이고 동시성 코드가 없다.
-- `main.ts` 는 모듈 수준 상태다. 목록 하나, 선택 하나라 store 계층은 전달만 하는 층이 된다.
-- `STATIC_LABELS` 의 id가 `index.html` 과 어긋나면 컴파일러는 못 잡는다. 대신 첫 화면을 띄우는 순간 `getElementById` 가 null이라 바로 깨진다.
+- 상태는 `App.svelte` 의 컴포넌트 상태다. 목록 하나, 선택 하나라 store 계층은 전달만 하는 층이 된다. 보정 패널은 `edit` 과 `onchange(change)` 만 받는다.
 - 초기화 버튼은 보정과 색 레이어를 되돌리고 회전·반전은 둔다.
 - 색 레이어의 픽셀 모드(어두운 색상, 밝은 색상, 색조, 채도, 색상, 광도)는 표로 줄일 수 없어 픽셀마다 계산한다. 1280x720 미리보기 한 장에 30~45 ms(Chromium)로, 표만 쓰는 편집의 약 25 ms보다 느리고, 이런 레이어를 쌓을수록 더해진다. 대신 썸네일·미리보기·저장이 계속 같은 `render` 하나를 쓴다.
 
@@ -148,6 +149,7 @@ File ─openSource─► Source{kind,rect,xmp} + thumb(240px)       [한 번 디
 - 노출과 검정 계열은 검은색과 흰색 끝을 예상대로 옮긴다. 색온도 ±100에도 순백과 순흑은 그대로다.
 - 불투명도 0인 색 레이어는 바이트가 같다. 혼합 모드마다 중립색(어둡게 하는 계열은 흰색, 밝게 하는 계열·차이·제외·빼기는 검은색, 라이트 계열은 회색)은 픽셀을 거의 그대로 둔다. 광도·색상 모드는 회색 레이어에서 회색을 만들고, 하드 혼합은 0과 255만 낸다. 불투명도 50은 절반 지점이다.
 - 색 레이어 입력은 잘못된 색, 없는 혼합 모드, 범위 밖 불투명도를 받지 않는다.
+- 레이어 추가는 사진에서 가장 많은 색조부터 고르고, 사진 색조를 다 쓰면 그 보색을 그늘에 스크린으로 넣고, 그다음은 처음부터 되풀이한다. 색이 없는 사진은 `NEW_LAYER` 를 쓴다. 어두운 사진은 스크린, 밝은 사진은 색상 번을 고르며, 밝기는 보정까지 적용한 사진으로 잰다.
 - 색 레이어는 아래부터 차례로 겹치고, 각 레이어는 아래 레이어까지 겹친 결과를 받는다. 추가는 맨 위에 놓고, 삭제와 값 변경은 고른 레이어만 바꾸며, 이동은 이웃과 자리를 바꾸고 끝에서는 그대로다.
 - 자동 보정은 가득 찬 회색 기울기를 거의 그대로 두고, 밝은 이미지를 어둡게 하지 않는다.
 - 자동 보정은 어두운 이미지를 중간 회색 쪽으로 일부만 올리고, 뿌연 이미지의 검정과 흰색 끝을 넓힌다.
@@ -164,8 +166,7 @@ File ─openSource─► Source{kind,rect,xmp} + thumb(240px)       [한 번 디
 ## 구현 반영
 
 - `updateEdit(id, change)` 를 `updateEdit(change)` 로 줄였다. 편집을 바꾸는 호출자는 모두 선택된 이미지를 고친다. 썸네일과 미리보기를 다시 그리는 길은 여전히 이것 하나다.
-- 아이콘 버튼은 보이는 글자가 없어서 `i18n.ts` 에 `accessibleName(el, key)` 를 더했다. 언어를 바꾸면 `label` 과 함께 다시 채운다.
-- `setLocale` 은 저장하지 않는다. 사용자가 언어를 고를 때만 `storeLocale` 로 저장한다. 첫 방문에 추측한 언어가 저장되면 브라우저 언어를 바꿔도 따라가지 않기 때문이다.
+- 첫 화면의 언어 추측은 저장하지 않는다. 사용자가 언어를 고를 때만 `storeLocale` 로 저장한다. 첫 방문에 추측한 언어가 저장되면 브라우저 언어를 바꿔도 따라가지 않기 때문이다.
 - 여백 띠는 사진 경계에서 1px 떨어진 곳부터 검사한다(`BLEED`). 실제 프린트 37장 중 3장에서 사진 바로 위 줄(y=68)이 사진 색으로 번져 있었고, 그 때문에 프린트로 판별되지 않았다. 번짐은 그 한 줄에만 있었고 사진 영역 (64, 69, 1920, 1080)은 그대로다.
 - `classify(width, height, readPixels)` 는 크기가 프린트와 같을 때만 픽셀을 읽는다. 큰 일반 사진을 판별하려고 통째로 복사하지 않는다.
 - 여러 번 끌어다 놓아도 열기는 앞의 열기가 끝난 뒤에 시작한다(`opening` 사슬). 디코딩은 언제나 한 장이다.
@@ -182,7 +183,9 @@ File ─openSource─► Source{kind,rect,xmp} + thumb(240px)       [한 번 디
 - 노출과 검정 계열을 보정에 더했다. 밝기(감마)와 대비(가운데 회색 축)만으로는 한쪽 끝만 늘일 수 없어서, 검정이 이미 0인 밤 사진을 밝히면 그늘이 떴다.
 - 색온도는 채널 이득 대신 채널별 거듭제곱 곡선이다. 중간 회색의 변화량은 예전 이득(±20%)과 같고, 0과 255는 움직이지 않는다. 이득 방식은 흰 부분에서 R이 255에 막히고 B만 줄어 하얀 곳이 노래졌다.
 - 색 레이어는 사람들이 VRChat 사진 위에 단색 레이어를 혼합 모드로 깔아 분위기를 내는 작업을 옮긴 것이다. 혼합 모드는 포토샵 목록 26가지를 모두 둔다. `BLEND_MODES` 는 채널마다 따로 계산되는 모드(`kind: "channel"`, 표 세 개로 미리 계산)와 세 채널을 함께 보는 모드(`kind: "pixel"`, 어두운 색상·밝은 색상·색조·채도·색상·광도, 픽셀마다 계산)를 나누는 표다. 디더 합성(Dissolve)만 뺐다. 픽셀마다 무작위 점을 찍는 모드라 썸네일, 미리보기, 저장본의 해상도마다 결과가 달라져 "셋이 같은 `render`" 원칙을 깬다.
-- 색 레이어는 여러 장을 쌓는다. `Edit.layers` 는 아래부터 위 순서의 배열이고, 화면의 카드 목록은 포토샵처럼 맨 위 레이어를 먼저 보인다. 카드는 레이어 수가 바뀔 때만 다시 만들고, 값이 바뀌면 그 자리의 입력만 고친다. 그래서 슬라이더를 끄는 동안 입력 요소가 바뀌지 않는다.
+- 색 레이어는 여러 장을 쌓는다. `Edit.layers` 는 아래부터 위 순서의 배열이고, 화면의 카드 목록은 포토샵처럼 맨 위 레이어를 먼저 보인다. 카드는 레이어 위치를 키로 그리므로, 값이 바뀌어도 그 자리의 입력 요소는 그대로다. 그래서 슬라이더를 끄는 동안 입력 요소가 바뀌지 않는다.
+- 레이어 추가는 색과 혼합 모드를 사진에서 고른다(`addLayer(edit, thumb)`). 색조는 채도×밝기로 가중한 36칸 색조 히스토그램에서 30° 이상 떨어진 봉우리를 많은 순서로 최대 넷 고르고, 회색·어두운·물 빠진 픽셀은 세지 않는다. 사진 색조 레이어는 로그 평균 밝기가 0.18 미만이면 스크린 25%, 0.45 초과면 색상 번 35%, 그 사이는 소프트 라이트 40%다. 기준은 실제 프린트 81장의 분포(중앙값 0.25, 하위 25% 0.19, 상위 10% 0.56)에서 정했다. 처음 정한 불투명도(스크린 40%, 소프트 라이트 50%)는 어두운 사진의 검정을 뿌옇게 띄워서 낮췄다. 사진 색조를 다 쓴 뒤의 레이어는 같은 색을 되풀이하지 않고 보색을 어두운 색(HSV 명도 0.3)으로 스크린 30%에 넣어 그늘만 물들인다. 색조가 하나뿐인 프린트가 81장 중 23장이라서, 두 번째 레이어가 같은 색이 되는 경우가 흔했다.
+- 화면을 Svelte 5로 옮겼다(사용자 결정). DOM을 직접 만들던 `main.ts` 의 `label`/`accessibleName`/`STATIC_LABELS` 와 레이어 카드 재생성 코드가 템플릿으로 바뀌었다. 타입 검사는 `svelte-check` 가 `.svelte` 와 `.ts` 를 함께 본다. ESLint는 `eslint-plugin-svelte` 로 `.svelte` 도 검사하고, 가져오기 제한 규칙도 `.svelte` 에 건다. 미리보기 캔버스의 `role="img"` 는 Svelte 접근성 경고를 끄고 유지했다. 사진을 나타내는 그림이기 때문이다.
 - TypeScript는 6.0으로 고정했다. typescript-eslint 8.72가 6.1 미만만 지원한다.
 - CI에 `pnpm run lint` 단계를 더했다. 접근 제어자와 가져오기 제한 규칙이 린트에만 있기 때문이다. 손으로 다시 배포할 수 있게 `workflow_dispatch` 도 켰다.
 
