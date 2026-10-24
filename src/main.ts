@@ -290,7 +290,10 @@ function buildEditorControls(): void {
   }
 
   const add = byId<HTMLButtonElement>("add-layer");
-  add.addEventListener("click", () => updateEdit(addLayer));
+  add.addEventListener("click", () => {
+    const item = selectedItem();
+    if (item) updateEdit((e) => addLayer(e, item.thumb));
+  });
   controls.push(add);
 
   const auto = byId<HTMLButtonElement>("auto");

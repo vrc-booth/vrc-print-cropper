@@ -140,7 +140,7 @@ export interface Edit {
 }
 
 export const NEUTRAL_ADJUST: Adjust = { exposure: 0, brightness: 0, contrast: 0, blacks: 0, saturation: 0, temperature: 0 };
-/** What `addLayer` puts on top. */
+/** What `addLayer` puts on top of a photo without any hue. */
 export const NEW_LAYER: Layer = { color: [255, 160, 64], mode: "softLight", opacity: 50 };
 export const IDENTITY_EDIT: Edit = { orientation: { turns: 0, flip: false }, adjust: NEUTRAL_ADJUST, layers: [] };
 
@@ -173,8 +173,98 @@ export function setAdjust(edit: Edit, key: AdjustKey, level: number): Edit {
   return { ...edit, adjust: { ...edit.adjust, [key]: clampInt(level, -100, 100) } };
 }
 
-export function addLayer(edit: Edit): Edit {
-  return { ...edit, layers: [...edit.layers, NEW_LAYER] };
+/**
+ * Puts a layer on top whose color and mode come from the photo as adjusted so far, layers left out.
+ * Layers go through the photo's hues (`photoHues`), then their opposites, cycling. A photo hue tints
+ * the whole picture in a mode that suits its brightness: a dark photo gets screen, which lifts the
+ * shadows toward the hue; a bright one color burn, which deepens and saturates; the rest soft light.
+ * An opposite hue goes into the shadows only, as a dark color in screen, so a second layer split-tones
+ * instead of repeating the first. A photo without any hue gets NEW_LAYER.
+ */
+export function addLayer(edit: Edit, src: Pixels): Edit {
+  const photo = render(src, { ...edit, layers: [] });
+  const hues = photoHues(photo);
+  const slot = edit.layers.length % (2 * hues.length || 1);
+  const layer =
+    hues.length === 0 ? NEW_LAYER : slot < hues.length ? tintLayer(hues[slot], logAverageLuma(photo)) : shadowLayer(hues[slot - hues.length] + Math.PI);
+  return { ...edit, layers: [...edit.layers, layer] };
+}
+
+/** Log-average luma (0–1) below which a photo counts as dark; about the darkest quarter of real prints. */
+const DARK_KEY = 0.18;
+/** Log-average luma above which a photo counts as bright; about the brightest sixth of real prints. */
+const BRIGHT_KEY = 0.45;
+
+function tintLayer(hue: number, key: number): Layer {
+  if (key < DARK_KEY) return { color: hsvToRgb(hue, 0.6, 0.45), mode: "screen", opacity: 25 };
+  if (key > BRIGHT_KEY) return { color: hsvToRgb(hue, 0.3, 1), mode: "colorBurn", opacity: 35 };
+  return { color: hsvToRgb(hue, 0.6, 1), mode: "softLight", opacity: 40 };
+}
+
+function shadowLayer(hue: number): Layer {
+  return { color: hsvToRgb(hue, 0.6, 0.3), mode: "screen", opacity: 30 };
+}
+
+const HUE_BINS = 36;
+/** Pixels below this saturation or brightness (0–1) carry too little hue to count. */
+const MIN_CHROMA = 0.25;
+/** A hue needs this share of all counted weight to become a color. */
+const MIN_HUE_SHARE = 0.04;
+/** Two picked hues are at least this many bins (10 degrees each) apart. */
+const HUE_GAP = 3;
+const MAX_COLORS = 4;
+
+/**
+ * The photo's main hues in radians, most common first: at most four, at least 30 degrees apart.
+ * Each pixel votes for its hue with weight saturation x brightness, so vivid colors decide and gray,
+ * dark and washed-out pixels do not.
+ */
+export function photoHues(src: Pixels): number[] {
+  const { data } = src;
+  const weight = new Float64Array(HUE_BINS);
+  const cos = new Float64Array(HUE_BINS);
+  const sin = new Float64Array(HUE_BINS);
+  let total = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const max = Math.max(r, g, b);
+    const range = max - Math.min(r, g, b);
+    const saturation = max === 0 ? 0 : range / max;
+    const value = max / 255;
+    if (saturation < MIN_CHROMA || value < MIN_CHROMA) continue;
+    const sector = max === r ? (g - b) / range : max === g ? 2 + (b - r) / range : 4 + (r - g) / range;
+    const hue = (((sector * Math.PI) / 3) + 2 * Math.PI) % (2 * Math.PI);
+    const bin = Math.min(HUE_BINS - 1, Math.floor((hue / (2 * Math.PI)) * HUE_BINS));
+    const w = saturation * value;
+    weight[bin] += w;
+    cos[bin] += w * Math.cos(hue);
+    sin[bin] += w * Math.sin(hue);
+    total += w;
+  }
+
+  const picked: number[] = [];
+  const order = [...weight.keys()].sort((a, b) => weight[b] - weight[a]);
+  for (const bin of order) {
+    if (picked.length === MAX_COLORS || weight[bin] === 0 || weight[bin] < MIN_HUE_SHARE * total) break;
+    const apart = picked.every((p) => {
+      const gap = Math.abs(p - bin);
+      return Math.min(gap, HUE_BINS - gap) >= HUE_GAP;
+    });
+    if (apart) picked.push(bin);
+  }
+  return picked.map((bin) => Math.atan2(sin[bin], cos[bin]));
+}
+
+/** Hue in radians, saturation and value in [0, 1]. */
+function hsvToRgb(hue: number, saturation: number, value: number): readonly [number, number, number] {
+  const h = ((((hue * 3) / Math.PI) % 6) + 6) % 6;
+  const channel = (n: number): number => {
+    const k = (n + h) % 6;
+    return Math.round(255 * value * (1 - saturation * Math.max(0, Math.min(k, 4 - k, 1))));
+  };
+  return [channel(5), channel(3), channel(1)];
 }
 
 export function removeLayer(edit: Edit, index: number): Edit {
@@ -270,16 +360,20 @@ export function autoAdjust(edit: Edit, src: Pixels): Edit {
   const white = (percentile(brightest, count, 0.995) / 255 - blackPoint) / (1 - blackPoint);
   if (white < 1) auto = setAdjust(auto, "exposure", Math.min(50, 100 * Math.log2(1 / white)));
 
-  const lit = render(src, auto).data;
-  let logSum = 0;
-  for (let i = 0; i < lit.length; i += 4) logSum += Math.log((0.299 * lit[i] + 0.587 * lit[i + 1] + 0.114 * lit[i + 2] + 1) / 256);
-  const key = Math.exp(logSum / count);
+  const key = logAverageLuma(render(src, auto));
   if (key < KEY_TARGET) {
     const goal = Math.exp(Math.log(key) + (Math.log(KEY_TARGET) - Math.log(key)) * 0.6);
     auto = setAdjust(auto, "brightness", Math.min(60, -100 * Math.log2(Math.log(goal) / Math.log(key))));
   }
 
   return { ...edit, adjust: { ...auto.adjust, saturation: edit.adjust.saturation } };
+}
+
+/** Geometric mean of luma in (0, 1]: how bright the photo looks, without a few highlights pulling it up. */
+function logAverageLuma({ data }: Pixels): number {
+  let sum = 0;
+  for (let i = 0; i < data.length; i += 4) sum += Math.log((0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2] + 1) / 256);
+  return Math.exp(sum / (data.length / 4));
 }
 
 /** The value at sorted index floor(fraction * total): the first level whose running count passes that index. */

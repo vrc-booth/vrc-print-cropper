@@ -6,6 +6,7 @@ import {
   NEW_LAYER,
   addLayer,
   autoAdjust,
+  photoHues,
   flipHorizontal,
   moveLayer,
   removeLayer,
@@ -150,10 +151,13 @@ const through = (rgb: Rgb, edit: Edit): Rgb => {
   return [out[0], out[1], out[2]];
 };
 
+/** A photo without hue, so `addLayer` falls back to NEW_LAYER's color. */
+const COLORLESS = image(1, 1, () => [128, 128, 128, 255]);
+
 /** `edit` with one more layer on top. */
 const stacked = (edit: Edit, mode: BlendMode, color: Rgb, opacity: number): Edit => {
   const top = edit.layers.length;
-  return setLayerOpacity(setLayerMode(setLayerColor(addLayer(edit), top, hex(color)), top, mode), top, opacity);
+  return setLayerOpacity(setLayerMode(setLayerColor(addLayer(edit, COLORLESS), top, hex(color)), top, mode), top, opacity);
 };
 
 const layered = (mode: BlendMode, color: Rgb, opacity: number): Edit => stacked(IDENTITY_EDIT, mode, color, opacity);
@@ -303,7 +307,7 @@ describe("layer stack", () => {
 
   it("adds new layers on top and removes only the chosen one", () => {
     const two = stacked(layered("multiply", BLACK, 30), "screen", WHITE, 70);
-    expect(addLayer(two).layers).toEqual([...two.layers, NEW_LAYER]);
+    expect(addLayer(two, COLORLESS).layers).toEqual([...two.layers, NEW_LAYER]);
     expect(removeLayer(two, 0).layers).toEqual([two.layers[1]]);
     expect(removeLayer(two, 1).layers).toEqual([two.layers[0]]);
   });
@@ -323,8 +327,56 @@ describe("layer stack", () => {
   });
 });
 
+describe("automatic layers", () => {
+  const solid = (rgb: Rgb) => (): [number, number, number, number] => rgba(rgb, 255);
+  /** 70 blue pixels, 30 red, 50 gray: mid-bright. */
+  const photo = image(150, 1, (i) => (i < 70 ? [30, 60, 200, 255] : i < 100 ? [210, 40, 40, 255] : [128, 128, 128, 255]));
+  const degrees = (hue: number): number => Math.round(((hue * 180) / Math.PI + 360) % 360);
+  const hueOf = ([r, g, b]: readonly number[]): string => (b > r && b > g ? "blue" : r > g && r > b ? "red" : "other");
+
+  it("orders the photo's hues by how much of the photo they color", () => {
+    const [blue, red] = photoHues(photo).map(degrees);
+    expect(blue).toBeGreaterThan(200);
+    expect(blue).toBeLessThan(250);
+    expect(Math.min(red, 360 - red)).toBeLessThan(15);
+  });
+
+  it("keeps close hues as one", () => {
+    expect(photoHues(image(100, 1, (i) => (i % 2 ? [30, 60, 200, 255] : [30, 80, 200, 255])))).toHaveLength(1);
+  });
+
+  it("ignores gray, dark and washed-out pixels, and then adds NEW_LAYER", () => {
+    const dull = image(3, 1, (i) => [[128, 128, 128, 255], [40, 10, 10, 255], [250, 240, 240, 255]][i] as [number, number, number, number]);
+    expect(photoHues(dull)).toEqual([]);
+    expect(addLayer(IDENTITY_EDIT, dull).layers[0]).toEqual(NEW_LAYER);
+  });
+
+  it("tints with the photo's hues, then puts their opposites into the shadows, then starts over", () => {
+    let edit = IDENTITY_EDIT;
+    for (let i = 0; i < 5; i++) edit = addLayer(edit, photo);
+    const [blue, red, orange, cyan, again] = edit.layers;
+    expect([blue, red].map((layer) => [hueOf(layer.color), layer.mode])).toEqual([["blue", "softLight"], ["red", "softLight"]]);
+    for (const shadow of [orange, cyan]) expect(shadow.mode).toBe("screen");
+    expect(orange.color[2]).toBeLessThan(orange.color[0]);
+    expect(cyan.color[0]).toBeLessThan(cyan.color[2]);
+    expect(Math.max(...orange.color)).toBeLessThan(128);
+    expect(again).toEqual(blue);
+  });
+
+  it("lifts a dark photo with screen and deepens a bright one with color burn", () => {
+    expect(addLayer(IDENTITY_EDIT, image(10, 1, solid([20, 40, 110]))).layers[0].mode).toBe("screen");
+    expect(addLayer(IDENTITY_EDIT, image(10, 1, solid([170, 200, 250]))).layers[0].mode).toBe("colorBurn");
+  });
+
+  it("measures the photo as adjusted, so brightening a dark photo changes the mode", () => {
+    const dark = image(10, 1, solid([30, 40, 90]));
+    expect(addLayer(IDENTITY_EDIT, dark).layers[0].mode).toBe("screen");
+    expect(addLayer(setAdjust(IDENTITY_EDIT, "exposure", 100), dark).layers[0].mode).not.toBe("screen");
+  });
+});
+
 describe("transitions", () => {
-  const one = addLayer(IDENTITY_EDIT);
+  const one = addLayer(IDENTITY_EDIT, COLORLESS);
 
   it("accepts only #rrggbb layer colors, in either case", () => {
     expect(setLayerColor(one, 0, "#FFa040").layers[0].color).toEqual([255, 160, 64]);
@@ -343,7 +395,7 @@ describe("transitions", () => {
   });
 
   it("clears adjustments and layers on reset but keeps the orientation", () => {
-    const messy = addLayer(setAdjust(rotateRight(IDENTITY_EDIT), "contrast", 40));
+    const messy = addLayer(setAdjust(rotateRight(IDENTITY_EDIT), "contrast", 40), COLORLESS);
     const reset = resetColor(messy);
     expect(reset.adjust).toEqual(IDENTITY_EDIT.adjust);
     expect(reset.layers).toEqual([]);
