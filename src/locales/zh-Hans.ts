@@ -7,8 +7,6 @@ export const zhHans: Dict = {
   openFiles: "打开图片",
   dropHint: "将图片拖放到此处",
   privacyNote: "所有处理都在浏览器中完成，不会上传任何内容。",
-  emptyList: "没有打开的图片",
-  noSelection: "请从列表中选择图片",
   preview: "预览",
   kind_print: "打印照片",
   kind_photo: "照片",

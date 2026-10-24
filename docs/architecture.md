@@ -15,7 +15,7 @@
 
 사용자가 읽는 설명:
 
-> VRChat 프린트나 사진을 끌어다 놓거나 "이미지 열기"를 누르세요. 프린트는 흰 프레임과 캡션이 자동으로 잘리고, 다른 이미지는 그대로 둡니다. 목록에서 이미지를 고르고 회전·반전하거나 보정 슬라이더를 움직이고, 필요하면 색 레이어를 얹은 뒤 저장하세요. "자동 보정"을 누르면 보정 슬라이더 값이 사진에 맞게 채워집니다. 프린트는 `<이름>_crop.png`, 그 밖의 이미지는 `<이름>_edit.png` 로 저장됩니다. VRChat 메타데이터(월드, 촬영자, 날짜)는 파일에 남습니다. 아무것도 업로드되지 않습니다.
+> VRChat 프린트나 사진을 끌어다 놓거나 "이미지 열기"를 누르세요. 프린트는 흰 프레임과 캡션이 자동으로 잘리고, 다른 이미지는 그대로 둡니다. 여러 장을 열었다면 아래 썸네일 줄에서 이미지를 고르고, 회전·반전하거나 보정 슬라이더를 움직이고, 필요하면 색 레이어를 얹은 뒤 저장하세요. "자동 보정"을 누르면 보정 슬라이더 값이 사진에 맞게 채워집니다. 프린트는 `<이름>_crop.png`, 그 밖의 이미지는 `<이름>_edit.png` 로 저장됩니다. VRChat 메타데이터(월드, 촬영자, 날짜)는 파일에 남습니다. 아무것도 업로드되지 않습니다.
 
 코드 안의 호출 지점:
 
@@ -44,7 +44,7 @@ expect(render(src, IDENTITY_EDIT).data).toEqual(src.data);
 | `src/png.ts` | `XmpChunk` 브랜드, `findXmpChunk`, `withXmp` | 없음 |
 | `src/source.ts` | `openSource`, `readSource`, `exportSource` | 있음 |
 | `src/i18n.ts` + `src/locales/*.ts` | 현재 언어, `pickLocale`, `t`, `label`, `accessibleName` | `setLocale`, `label`, `accessibleName` 만 |
-| `src/main.ts` | 목록, 선택, 미리보기 캐시, DOM 연결 | 있음 |
+| `src/main.ts` | 열린 이미지와 썸네일 줄, 선택, 미리보기 캐시, DOM 연결 | 있음 |
 
 **데이터.**
 
@@ -58,7 +58,7 @@ expect(render(src, IDENTITY_EDIT).data).toEqual(src.data);
 File ─openSource─► Source{kind,rect,xmp} + thumb(240px)       [한 번 디코딩 후 픽셀 버림]
 선택 ─readSource(source, 1280)─► 미리보기 Pixels (선택된 한 장만 캐시)
 슬라이더·회전 ─updateEdit─► item.edit ─rAF─► render(미리보기, edit) ─► 캔버스
-                                     └─────► render(thumb, edit)   ─► 목록 행
+                                     └─────► render(thumb, edit)   ─► 썸네일
 저장 ─exportSource─► readSource(전체) ► render ► toBlob PNG ► withXmp ► {name, blob}
 ```
 

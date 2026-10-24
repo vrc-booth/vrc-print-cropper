@@ -5,8 +5,6 @@ export const ko = {
   openFiles: "이미지 열기",
   dropHint: "이미지를 여기에 끌어다 놓으세요",
   privacyNote: "모든 처리는 브라우저 안에서 이루어지며, 아무것도 업로드되지 않습니다.",
-  emptyList: "열린 이미지가 없습니다",
-  noSelection: "목록에서 이미지를 고르세요",
   preview: "미리보기",
   kind_print: "프린트",
   kind_photo: "사진",

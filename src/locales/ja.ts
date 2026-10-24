@@ -7,8 +7,6 @@ export const ja: Dict = {
   openFiles: "画像を開く",
   dropHint: "ここに画像をドロップ",
   privacyNote: "処理はすべてブラウザ内で行われ、何もアップロードされません。",
-  emptyList: "開いている画像はありません",
-  noSelection: "リストから画像を選んでください",
   preview: "プレビュー",
   kind_print: "プリント",
   kind_photo: "写真",

@@ -7,8 +7,6 @@ export const en: Dict = {
   openFiles: "Open images",
   dropHint: "Drop images here",
   privacyNote: "Everything runs in your browser. Nothing is uploaded.",
-  emptyList: "No images open",
-  noSelection: "Pick an image from the list",
   preview: "Preview",
   kind_print: "Print",
   kind_photo: "Photo",

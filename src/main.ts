@@ -83,10 +83,9 @@ const LAYER_ICONS = {
 const STATIC_LABELS = {
   "app-title": "appTitle",
   "language-label": "language",
-  "open-label": "openFiles",
+  open: "openFiles",
+  "drop-label": "openFiles",
   "drop-hint": "dropHint",
-  "list-empty": "emptyList",
-  "no-selection": "noSelection",
   "adjust-title": "adjustments",
   "layer-title": "layer",
   "add-layer": "layerAdd",
@@ -138,8 +137,7 @@ function main(): void {
   syncControls(null);
 
   const files = byId<HTMLInputElement>("files");
-  const open = byId<HTMLButtonElement>("open");
-  open.addEventListener("click", () => files.click());
+  for (const id of ["open", "drop"]) byId(id).addEventListener("click", () => files.click());
   files.addEventListener("change", () => {
     addFiles([...(files.files ?? [])]);
     files.value = "";
@@ -147,14 +145,14 @@ function main(): void {
 
   window.addEventListener("dragover", (event) => {
     event.preventDefault();
-    open.classList.add("dragging");
+    byId("stage").classList.add("dragging");
   });
   window.addEventListener("dragleave", (event) => {
-    if (event.relatedTarget === null) open.classList.remove("dragging");
+    if (event.relatedTarget === null) byId("stage").classList.remove("dragging");
   });
   window.addEventListener("drop", (event) => {
     event.preventDefault();
-    open.classList.remove("dragging");
+    byId("stage").classList.remove("dragging");
     addFiles([...(event.dataTransfer?.files ?? [])]);
   });
 }
@@ -172,7 +170,9 @@ async function openFiles(files: readonly File[]): Promise<void> {
       const item: Item = { id, source, thumb, edit: IDENTITY_EDIT, row: renderListItem(id, source) };
       items.set(id, item);
       byId("list").append(item.row.element);
-      byId("list-empty").hidden = true;
+      // The strip only helps once there is something to switch to.
+      byId("list").hidden = items.size < 2;
+      byId("drop").hidden = true;
       paintThumb(item);
       if (selected === null) void select(id);
     } catch {
@@ -189,6 +189,13 @@ async function select(id: ItemId): Promise<void> {
   preview = null;
   byId("preview").hidden = true;
   for (const other of items.values()) other.row.button.setAttribute("aria-current", String(other.id === id));
+  const name = document.createElement("span");
+  name.className = "caption-name";
+  name.textContent = item.source.file.name;
+  const kind = label(document.createElement("span"), `kind_${item.source.kind}`);
+  kind.className = `kind kind-${item.source.kind}`;
+  byId("caption").replaceChildren(name, kind);
+  byId("toolbar").hidden = false;
   syncControls(item.edit);
   try {
     const pixels = await readSource(item.source, PREVIEW_SIDE);
@@ -234,29 +241,22 @@ function schedulePreview(): void {
     const canvas = byId<HTMLCanvasElement>("preview");
     draw(canvas, render(preview.pixels, item.edit));
     canvas.hidden = false;
-    byId("no-selection").hidden = true;
   });
 }
 
+/** A thumbnail button in the strip; the file name is its accessible name and tooltip. */
 function renderListItem(id: ItemId, source: Source): ListRow {
   const element = document.createElement("li");
   const button = document.createElement("button");
   button.type = "button";
   button.setAttribute("aria-current", "false");
+  button.setAttribute("aria-label", source.file.name);
+  button.title = source.file.name;
   button.addEventListener("click", () => void select(id));
 
   const canvas = document.createElement("canvas");
   canvas.setAttribute("aria-hidden", "true");
-  const text = document.createElement("span");
-  text.className = "item-text";
-  const fileName = document.createElement("span");
-  fileName.className = "item-name";
-  fileName.textContent = source.file.name;
-  const kind = label(document.createElement("span"), `kind_${source.kind}`);
-  kind.className = `kind kind-${source.kind}`;
-
-  text.append(fileName, kind);
-  button.append(canvas, text);
+  button.append(canvas);
   element.append(button);
   return { element, button, canvas };
 }
@@ -279,14 +279,11 @@ function buildEditorControls(): void {
   for (const key of ADJUST_KEYS) {
     const field = document.createElement("label");
     field.className = "slider";
-    const head = document.createElement("span");
-    head.className = "slider-head";
     const value = document.createElement("output");
-    head.append(label(document.createElement("span"), `adjust_${key}`), value);
     const input = document.createElement("input");
     Object.assign(input, { type: "range", min: "-100", max: "100", step: "1", value: "0" });
     input.addEventListener("input", () => updateEdit((e) => setAdjust(e, key, Number(input.value))));
-    field.append(head, input);
+    field.append(label(document.createElement("span"), `adjust_${key}`), input, value);
     container.append(field);
     sliders.set(key, { input, value });
     controls.push(input);

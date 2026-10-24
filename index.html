@@ -9,34 +9,39 @@
   <body>
     <header class="bar">
       <h1 id="app-title"></h1>
-      <label class="language"><span id="language-label"></span> <select id="locale"></select></label>
+      <div class="bar-actions">
+        <button id="open" type="button"></button>
+        <label class="language"><span id="language-label"></span> <select id="locale"></select></label>
+      </div>
     </header>
+    <input id="files" type="file" accept="image/*" multiple hidden />
     <main class="layout">
-      <aside class="pane list-pane">
-        <button id="open" class="open" type="button"><span id="open-label"></span><span id="drop-hint" class="hint"></span></button>
-        <input id="files" type="file" accept="image/*" multiple hidden />
-        <ul id="list" class="list"></ul>
-        <p id="list-empty" class="hint"></p>
-      </aside>
       <section class="editor">
-        <div class="stage">
+        <div id="stage" class="stage">
           <canvas id="preview" role="img" hidden></canvas>
-          <p id="no-selection" class="hint"></p>
+          <button id="drop" class="drop" type="button"><span id="drop-label"></span><span id="drop-hint" class="hint"></span></button>
         </div>
-        <div id="orient" class="orient"></div>
+        <div id="toolbar" class="toolbar" hidden>
+          <p id="caption" class="caption"></p>
+          <div id="orient" class="orient"></div>
+        </div>
+        <ul id="list" class="strip" hidden></ul>
       </section>
       <section class="pane adjust-pane">
-        <h2 id="adjust-title"></h2>
+        <div class="section-head">
+          <h2 id="adjust-title"></h2>
+          <button id="auto" type="button"></button>
+        </div>
         <div id="sliders" class="sliders"></div>
         <div class="section-head">
           <h2 id="layer-title"></h2>
           <button id="add-layer" type="button"></button>
         </div>
         <ol id="layers" class="layers"></ol>
-        <button id="auto" type="button"></button>
-        <button id="reset" type="button"></button>
-        <div class="spacer"></div>
-        <button id="save" class="primary" type="button"></button>
+        <div class="panel-actions">
+          <button id="reset" type="button"></button>
+          <button id="save" class="primary" type="button"></button>
+        </div>
       </section>
     </main>
     <div id="status" class="status" aria-live="polite"></div>
