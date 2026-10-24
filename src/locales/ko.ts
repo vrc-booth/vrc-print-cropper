@@ -23,6 +23,7 @@ export const ko = {
   layerMode: "혼합 모드",
   layerOpacity: "불투명도",
   layerAdd: "레이어 추가",
+  layerAuto: "자동 레이어",
   layerUp: "위로 이동",
   layerDown: "아래로 이동",
   layerRemove: "레이어 삭제",

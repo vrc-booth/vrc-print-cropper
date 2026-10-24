@@ -174,35 +174,114 @@ export function setAdjust(edit: Edit, key: AdjustKey, level: number): Edit {
 }
 
 /**
- * Puts a layer on top whose color and mode come from the photo as adjusted so far, layers left out.
- * Layers go through the photo's hues (`photoHues`), then their opposites, cycling. A photo hue tints
- * the whole picture in a mode that suits its brightness: a dark photo gets screen, which lifts the
- * shadows toward the hue; a bright one color burn, which deepens and saturates; the rest soft light.
- * An opposite hue goes into the shadows only, as a dark color in screen, so a second layer split-tones
- * instead of repeating the first. A photo without any hue gets NEW_LAYER.
+ * Replaces every layer with the ones this photo needs (`planLayers`). It measures the photo as
+ * adjusted so far with layers left out, so pressing it again changes nothing.
+ */
+export function autoLayers(edit: Edit, src: Pixels): Edit {
+  return { ...edit, layers: planLayers(render(src, { ...edit, layers: [] })) };
+}
+
+/**
+ * Adds the first layer `autoLayers` would set that is not on the photo yet. Once all of those are
+ * there, it adds soft light tints of the photo's hues in turn, or NEW_LAYER when the photo has none.
  */
 export function addLayer(edit: Edit, src: Pixels): Edit {
   const photo = render(src, { ...edit, layers: [] });
+  const has = (layer: Layer): boolean =>
+    edit.layers.some((l) => l.mode === layer.mode && l.opacity === layer.opacity && l.color.every((c, i) => c === layer.color[i]));
   const hues = photoHues(photo);
-  const slot = edit.layers.length % (2 * hues.length || 1);
   const layer =
-    hues.length === 0 ? NEW_LAYER : slot < hues.length ? tintLayer(hues[slot], logAverageLuma(photo)) : shadowLayer(hues[slot - hues.length] + Math.PI);
+    planLayers(photo).find((l) => !has(l)) ??
+    (hues.length === 0 ? NEW_LAYER : { color: hsvToRgb(hues[edit.layers.length % hues.length].hue, 0.6, 1), mode: "softLight", opacity: 40 });
   return { ...edit, layers: [...edit.layers, layer] };
 }
 
-/** Log-average luma (0–1) below which a photo counts as dark; about the darkest quarter of real prints. */
-const DARK_KEY = 0.18;
-/** Log-average luma above which a photo counts as bright; about the brightest sixth of real prints. */
-const BRIGHT_KEY = 0.45;
+/** A hue is the photo's main color when it holds at least this share of all color. */
+const DOMINANT_SHARE = 0.5;
+/** Mean saturation (0–1) of lit pixels below which colors count as washed out. */
+const DULL = 0.3;
+/** Saturation of the shadows' mean color below which shadows count as neutral gray. */
+const NEUTRAL = 0.1;
+/** The darkest share of pixels taken as the shadows. */
+const SHADOW_SHARE = 0.3;
+/** Luma 10/255: darker pixels show no detail on a typical display. */
+const BLACK = 10 / 255;
+/** Share of pixels darker than BLACK above which shadows count as crushed. */
+const CRUSHED = 0.02;
+/** Hue for photos without one: warm light, so the shadows get the cool opposite. */
+const WARM = Math.PI / 6;
 
-function tintLayer(hue: number, key: number): Layer {
-  if (key < DARK_KEY) return { color: hsvToRgb(hue, 0.6, 0.45), mode: "screen", opacity: 25 };
-  if (key > BRIGHT_KEY) return { color: hsvToRgb(hue, 0.3, 1), mode: "colorBurn", opacity: 35 };
-  return { color: hsvToRgb(hue, 0.6, 1), mode: "softLight", opacity: 40 };
+/**
+ * The layers this photo needs, bottom first. Each answers one measured need and its opacity grows
+ * with that need from 10%, the least that shows, so a photo that needs none gets none:
+ * - one hue holds most of the color: a soft light tint of it pulls the rest of the picture together,
+ *   kept light because it also deepens the cast the photo already has;
+ * - colors are washed out: a light color burn of the main hue deepens and saturates them;
+ * - shadows are neutral gray: a dark soft light of the opposite hue colors them without lifting black;
+ * - shadows are crushed to black: a dark, grayish screen of the main hue opens them; the opposite
+ *   hue would turn black into its color.
+ * The opposite hue is the photo's own hue when one lies within 60 degrees of it, so the toning
+ * follows the color contrast the photo already has.
+ */
+function planLayers(photo: Pixels): Layer[] {
+  const { hues, saturation, shadowSaturation, crushed } = measure(photo);
+  const main = hues[0];
+  const hue = main?.hue ?? WARM;
+  const opposite = hues.find((h) => hueDistance(h.hue, hue + Math.PI) < Math.PI / 3)?.hue ?? hue + Math.PI;
+  const layers: Layer[] = [];
+  if (main && main.share >= DOMINANT_SHARE) layers.push({ color: hsvToRgb(hue, 0.6, 1), mode: "softLight", opacity: Math.round(10 + (10 * (main.share - DOMINANT_SHARE)) / (1 - DOMINANT_SHARE)) });
+  if (saturation < DULL) layers.push({ color: hsvToRgb(hue, 0.3, 1), mode: "colorBurn", opacity: Math.round(10 + 30 * (1 - saturation / DULL)) });
+  if (shadowSaturation < NEUTRAL) {
+    layers.push({ color: hsvToRgb(opposite, 0.7, 0.35), mode: "softLight", opacity: Math.round(15 + 20 * (1 - shadowSaturation / NEUTRAL)) });
+  }
+  if (crushed > CRUSHED) layers.push({ color: hsvToRgb(hue, 0.4, 0.45), mode: "screen", opacity: Math.round(Math.min(30, 10 + 100 * (crushed - CRUSHED))) });
+  return layers;
 }
 
-function shadowLayer(hue: number): Layer {
-  return { color: hsvToRgb(hue, 0.6, 0.3), mode: "screen", opacity: 30 };
+function hueDistance(a: number, b: number): number {
+  const d = (((a - b) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  return Math.min(d, 2 * Math.PI - d);
+}
+
+interface Look {
+  readonly hues: ReadonlyArray<{ readonly hue: number; readonly share: number }>;
+  /** Mean HSV saturation of pixels at least MIN_CHROMA bright; darker ones carry no reliable color. */
+  readonly saturation: number;
+  /** HSV saturation of the mean color of the darkest SHADOW_SHARE of pixels. */
+  readonly shadowSaturation: number;
+  /** Share of pixels darker than BLACK. */
+  readonly crushed: number;
+}
+
+function measure(photo: Pixels): Look {
+  const { data } = photo;
+  const count = data.length / 4;
+  const luma = new Float64Array(count);
+  let saturationSum = 0;
+  let lit = 0;
+  let crushed = 0;
+  for (let p = 0, i = 0; p < count; p++, i += 4) {
+    const max = Math.max(data[i], data[i + 1], data[i + 2]);
+    luma[p] = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255;
+    if (luma[p] < BLACK) crushed++;
+    if (max / 255 >= MIN_CHROMA) {
+      saturationSum += (max - Math.min(data[i], data[i + 1], data[i + 2])) / max;
+      lit++;
+    }
+  }
+  const cut = luma.slice().sort()[Math.floor(SHADOW_SHARE * (count - 1))];
+  const mean = [0, 0, 0];
+  for (let p = 0, i = 0; p < count; p++, i += 4) {
+    if (luma[p] > cut) continue;
+    for (let c = 0; c < 3; c++) mean[c] += data[i + c];
+  }
+  const max = Math.max(...mean);
+  return {
+    hues: photoHues(photo),
+    saturation: lit === 0 ? 0 : saturationSum / lit,
+    shadowSaturation: max === 0 ? 0 : (max - Math.min(...mean)) / max,
+    crushed: crushed / count,
+  };
 }
 
 const HUE_BINS = 36;
@@ -215,11 +294,11 @@ const HUE_GAP = 3;
 const MAX_COLORS = 4;
 
 /**
- * The photo's main hues in radians, most common first: at most four, at least 30 degrees apart.
- * Each pixel votes for its hue with weight saturation x brightness, so vivid colors decide and gray,
- * dark and washed-out pixels do not.
+ * The photo's main hues in radians, most common first: at most four, at least 30 degrees apart, each
+ * with its share of all color, counting every hue toward the nearest picked one. Each pixel votes for its hue with weight saturation x brightness, so
+ * vivid colors decide and gray, dark and washed-out pixels do not.
  */
-export function photoHues(src: Pixels): number[] {
+export function photoHues(src: Pixels): Array<{ hue: number; share: number }> {
   const { data } = src;
   const weight = new Float64Array(HUE_BINS);
   const cos = new Float64Array(HUE_BINS);
@@ -254,7 +333,12 @@ export function photoHues(src: Pixels): number[] {
     });
     if (apart) picked.push(bin);
   }
-  return picked.map((bin) => Math.atan2(sin[bin], cos[bin]));
+  const share = picked.map(() => 0);
+  for (const bin of weight.keys()) {
+    const gaps = picked.map((p) => Math.min(Math.abs(p - bin), HUE_BINS - Math.abs(p - bin)));
+    share[gaps.indexOf(Math.min(...gaps))] += weight[bin] / total;
+  }
+  return picked.map((bin, n) => ({ hue: Math.atan2(sin[bin], cos[bin]), share: share[n] }));
 }
 
 /** Hue in radians, saturation and value in [0, 1]. */

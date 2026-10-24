@@ -25,6 +25,7 @@ export const en: Dict = {
   layerMode: "Blend mode",
   layerOpacity: "Opacity",
   layerAdd: "Add layer",
+  layerAuto: "Auto layers",
   layerUp: "Move up",
   layerDown: "Move down",
   layerRemove: "Delete layer",

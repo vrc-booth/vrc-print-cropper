@@ -6,6 +6,7 @@ import {
   NEW_LAYER,
   addLayer,
   autoAdjust,
+  autoLayers,
   photoHues,
   flipHorizontal,
   moveLayer,
@@ -151,7 +152,7 @@ const through = (rgb: Rgb, edit: Edit): Rgb => {
   return [out[0], out[1], out[2]];
 };
 
-/** A photo without hue, so `addLayer` falls back to NEW_LAYER's color. */
+/** A gray photo; `stacked` sets every field of the layer `addLayer` gives it. */
 const COLORLESS = image(1, 1, () => [128, 128, 128, 255]);
 
 /** `edit` with one more layer on top. */
@@ -307,7 +308,9 @@ describe("layer stack", () => {
 
   it("adds new layers on top and removes only the chosen one", () => {
     const two = stacked(layered("multiply", BLACK, 30), "screen", WHITE, 70);
-    expect(addLayer(two, COLORLESS).layers).toEqual([...two.layers, NEW_LAYER]);
+    const three = addLayer(two, COLORLESS).layers;
+    expect(three).toHaveLength(3);
+    expect(three.slice(0, 2)).toEqual(two.layers);
     expect(removeLayer(two, 0).layers).toEqual([two.layers[1]]);
     expect(removeLayer(two, 1).layers).toEqual([two.layers[0]]);
   });
@@ -328,50 +331,93 @@ describe("layer stack", () => {
 });
 
 describe("automatic layers", () => {
-  const solid = (rgb: Rgb) => (): [number, number, number, number] => rgba(rgb, 255);
+  type Px = [number, number, number, number];
   /** 70 blue pixels, 30 red, 50 gray: mid-bright. */
   const photo = image(150, 1, (i) => (i < 70 ? [30, 60, 200, 255] : i < 100 ? [210, 40, 40, 255] : [128, 128, 128, 255]));
+  /** Vivid blue, red and green in equal parts: no main hue, colored shadows, no black. */
+  const balanced = image(90, 1, (i) => [[40, 80, 230, 255], [230, 50, 50, 255], [50, 200, 60, 255]][i % 3] as Px);
+  /** `share` of the pixels pure black, the rest balanced. */
+  const crushed = (share: number) => image(100, 1, (i) => (i < 100 * share ? [0, 0, 0, 255] : ([[40, 80, 230, 255], [230, 50, 50, 255], [50, 200, 60, 255]][i % 3] as Px)));
   const degrees = (hue: number): number => Math.round(((hue * 180) / Math.PI + 360) % 360);
   const hueOf = ([r, g, b]: readonly number[]): string => (b > r && b > g ? "blue" : r > g && r > b ? "red" : "other");
+  const modes = (edit: Edit): string[] => edit.layers.map((layer) => layer.mode);
 
-  it("orders the photo's hues by how much of the photo they color", () => {
-    const [blue, red] = photoHues(photo).map(degrees);
-    expect(blue).toBeGreaterThan(200);
-    expect(blue).toBeLessThan(250);
-    expect(Math.min(red, 360 - red)).toBeLessThan(15);
+  it("orders the photo's hues by how much of the photo's color they hold", () => {
+    const [blue, red] = photoHues(photo);
+    expect(degrees(blue.hue)).toBeGreaterThan(200);
+    expect(degrees(blue.hue)).toBeLessThan(250);
+    expect(Math.min(degrees(red.hue), 360 - degrees(red.hue))).toBeLessThan(15);
+    expect(blue.share).toBeGreaterThan(red.share);
+    expect(blue.share + red.share).toBeCloseTo(1);
   });
 
   it("keeps close hues as one", () => {
     expect(photoHues(image(100, 1, (i) => (i % 2 ? [30, 60, 200, 255] : [30, 80, 200, 255])))).toHaveLength(1);
   });
 
-  it("ignores gray, dark and washed-out pixels, and then adds NEW_LAYER", () => {
-    const dull = image(3, 1, (i) => [[128, 128, 128, 255], [40, 10, 10, 255], [250, 240, 240, 255]][i] as [number, number, number, number]);
-    expect(photoHues(dull)).toEqual([]);
-    expect(addLayer(IDENTITY_EDIT, dull).layers[0]).toEqual(NEW_LAYER);
+  it("ignores gray, dark and washed-out pixels", () => {
+    expect(photoHues(image(3, 1, (i) => [[128, 128, 128, 255], [40, 10, 10, 255], [250, 240, 240, 255]][i] as Px))).toEqual([]);
   });
 
-  it("tints with the photo's hues, then puts their opposites into the shadows, then starts over", () => {
+  it("adds nothing to a photo that needs nothing", () => {
+    expect(autoLayers(IDENTITY_EDIT, balanced).layers).toEqual([]);
+  });
+
+  it("tints a photo whose color is mostly one hue with that hue", () => {
+    const blue = autoLayers(IDENTITY_EDIT, image(10, 1, () => [40, 80, 230, 255])).layers;
+    expect(blue.map((layer) => [layer.mode, hueOf(layer.color)])).toEqual([["softLight", "blue"]]);
+  });
+
+  it("deepens washed-out colors with color burn", () => {
+    expect(modes(autoLayers(IDENTITY_EDIT, image(10, 1, () => [200, 185, 175, 255])))).toContain("colorBurn");
+  });
+
+  it("tones gray shadows with a dark version of the opposite hue", () => {
+    const orange = image(10, 1, (i) => (i < 5 ? [60, 60, 60, 255] : [230, 120, 30, 255]));
+    const shadow = autoLayers(IDENTITY_EDIT, orange).layers.find((layer) => layer.mode === "softLight" && Math.max(...layer.color) < 128);
+    expect(shadow && hueOf(shadow.color)).toBe("blue");
+  });
+
+  it("opens crushed shadows, the more of them the stronger", () => {
+    const lift = (share: number) => autoLayers(IDENTITY_EDIT, crushed(share)).layers.find((layer) => layer.mode === "screen");
+    expect(autoLayers(IDENTITY_EDIT, crushed(0)).layers.find((layer) => layer.mode === "screen")).toBeUndefined();
+    expect(lift(0.1)!.opacity).toBeGreaterThanOrEqual(10);
+    expect(lift(0.2)!.opacity).toBeGreaterThan(lift(0.1)!.opacity);
+  });
+
+  it("replaces every layer, so pressing it again changes nothing", () => {
+    const mine = stacked(IDENTITY_EDIT, "multiply", [10, 20, 30], 50);
+    const auto = autoLayers(mine, photo);
+    expect(auto.layers).toEqual(autoLayers(IDENTITY_EDIT, photo).layers);
+    expect(autoLayers(auto, photo)).toEqual(auto);
+  });
+
+  it("measures the photo as adjusted", () => {
+    const dull = image(10, 1, () => [180, 150, 140, 255]);
+    expect(modes(autoLayers(IDENTITY_EDIT, dull))).toContain("colorBurn");
+    expect(modes(autoLayers(setAdjust(IDENTITY_EDIT, "saturation", 100), dull))).not.toContain("colorBurn");
+  });
+
+  it("adds the planned layers one at a time, then tints with the photo's hues, then NEW_LAYER without any", () => {
+    const planned = autoLayers(IDENTITY_EDIT, photo).layers;
     let edit = IDENTITY_EDIT;
-    for (let i = 0; i < 5; i++) edit = addLayer(edit, photo);
-    const [blue, red, orange, cyan, again] = edit.layers;
-    expect([blue, red].map((layer) => [hueOf(layer.color), layer.mode])).toEqual([["blue", "softLight"], ["red", "softLight"]]);
-    for (const shadow of [orange, cyan]) expect(shadow.mode).toBe("screen");
-    expect(orange.color[2]).toBeLessThan(orange.color[0]);
-    expect(cyan.color[0]).toBeLessThan(cyan.color[2]);
-    expect(Math.max(...orange.color)).toBeLessThan(128);
-    expect(again).toEqual(blue);
+    for (let i = 0; i < planned.length; i++) edit = addLayer(edit, photo);
+    expect(edit.layers).toEqual(planned);
+    const next = addLayer(edit, photo).layers.at(-1)!;
+    expect(next.mode).toBe("softLight");
+    expect(["blue", "red"]).toContain(hueOf(next.color));
+
+    const gray = image(1, 1, () => [128, 128, 128, 255]);
+    const full = autoLayers(IDENTITY_EDIT, gray);
+    expect(addLayer(full, gray).layers.at(-1)).toEqual(NEW_LAYER);
   });
 
-  it("lifts a dark photo with screen and deepens a bright one with color burn", () => {
-    expect(addLayer(IDENTITY_EDIT, image(10, 1, solid([20, 40, 110]))).layers[0].mode).toBe("screen");
-    expect(addLayer(IDENTITY_EDIT, image(10, 1, solid([170, 200, 250]))).layers[0].mode).toBe("colorBurn");
-  });
-
-  it("measures the photo as adjusted, so brightening a dark photo changes the mode", () => {
-    const dark = image(10, 1, solid([30, 40, 90]));
-    expect(addLayer(IDENTITY_EDIT, dark).layers[0].mode).toBe("screen");
-    expect(addLayer(setAdjust(IDENTITY_EDIT, "exposure", 100), dark).layers[0].mode).not.toBe("screen");
+  it("skips a planned layer the photo already has", () => {
+    const dark = crushed(0.3);
+    const planned = autoLayers(IDENTITY_EDIT, dark).layers;
+    expect(planned).toHaveLength(2);
+    const second = { ...IDENTITY_EDIT, layers: [planned[1]] };
+    expect(addLayer(second, dark).layers).toEqual([planned[1], planned[0]]);
   });
 });
 

@@ -5,6 +5,7 @@
     IDENTITY_EDIT,
     addLayer,
     autoAdjust,
+    autoLayers,
     moveLayer,
     removeLayer,
     resetColor,
@@ -74,9 +75,12 @@
   </div>
   <div class="section-head">
     <h2>{t("layer")}</h2>
-    <button bind:this={addButton} type="button" disabled={!edit} onclick={() => thumb && onchange((e) => addLayer(e, thumb))}>
-      {t("layerAdd")}
-    </button>
+    <div class="head-actions">
+      <button type="button" disabled={!edit} onclick={() => thumb && onchange((e) => autoLayers(e, thumb))}>{t("layerAuto")}</button>
+      <button bind:this={addButton} type="button" disabled={!edit} onclick={() => thumb && onchange((e) => addLayer(e, thumb))}>
+        {t("layerAdd")}
+      </button>
+    </div>
   </div>
   {#if cards.length > 0}
     <ol class="layers">

@@ -25,6 +25,7 @@ export const ja: Dict = {
   layerMode: "描画モード",
   layerOpacity: "不透明度",
   layerAdd: "レイヤーを追加",
+  layerAuto: "自動レイヤー",
   layerUp: "上へ移動",
   layerDown: "下へ移動",
   layerRemove: "レイヤーを削除",

@@ -25,6 +25,7 @@ export const zhHant: Dict = {
   layerMode: "混合模式",
   layerOpacity: "不透明度",
   layerAdd: "新增圖層",
+  layerAuto: "自動圖層",
   layerUp: "上移",
   layerDown: "下移",
   layerRemove: "刪除圖層",

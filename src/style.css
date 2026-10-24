@@ -320,9 +320,25 @@ h2 {
 
 .section-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+/* Labels stay on one line; in a long language the buttons move below the heading instead. */
+.section-head h2,
+.section-head button {
+  white-space: nowrap;
+}
+
+.head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.head-actions button {
+  padding: 0 12px;
 }
 
 .sliders + .section-head {

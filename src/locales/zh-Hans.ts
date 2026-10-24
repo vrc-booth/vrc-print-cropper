@@ -25,6 +25,7 @@ export const zhHans: Dict = {
   layerMode: "混合模式",
   layerOpacity: "不透明度",
   layerAdd: "添加图层",
+  layerAuto: "自动图层",
   layerUp: "上移",
   layerDown: "下移",
   layerRemove: "删除图层",
