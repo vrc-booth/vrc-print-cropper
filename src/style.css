@@ -127,7 +127,8 @@ h1 {
   font-size: 13px;
 }
 
-.language select {
+.language select,
+.layer select {
   min-height: 44px;
   padding: 0 8px;
   border-radius: 6px;
@@ -269,7 +270,7 @@ h1 {
   gap: 8px;
 }
 
-.orient button {
+.icon {
   min-width: 44px;
   padding: 0;
   display: flex;
@@ -320,6 +321,86 @@ h2 {
   accent-color: var(--accent);
 }
 
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.layers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.layers:empty {
+  display: none;
+}
+
+.layer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.layer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.layer select {
+  flex: 1;
+  min-width: 0;
+}
+
+.layer input[type="color"] {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 4px;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.layer input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.layer output {
+  min-width: 40px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.layer .icon {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.layer .icon:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+#add-layer,
 #auto,
 #reset {
   align-self: flex-start;

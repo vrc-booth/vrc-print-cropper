@@ -33,13 +33,116 @@ export type AdjustKey = (typeof ADJUST_KEYS)[number];
 /** Integer slider level in [-100, 100]; 0 is neutral. Clamped by `setAdjust`. */
 export type Adjust = Readonly<Record<AdjustKey, number>>;
 
+/** Channels in [0, 1]. */
+type Rgb = readonly [number, number, number];
+
+/**
+ * How a layer color combines with the photo. A separable mode treats each channel alone, so it
+ * compiles to one 256-entry table per channel. A pixel mode reads all three channels of both
+ * colors (hue, luminosity, whole-pixel comparisons), so it runs per pixel.
+ * Separable results may leave [0, 1]; the compiled table clamps them.
+ */
+type Blend =
+  | { readonly kind: "channel"; readonly blend: (base: number, layer: number) => number }
+  | { readonly kind: "pixel"; readonly blend: (base: Rgb, layer: Rgb) => Rgb };
+
+const channel = (blend: (base: number, layer: number) => number): Blend => ({ kind: "channel", blend });
+const pixel = (blend: (base: Rgb, layer: Rgb) => Rgb): Blend => ({ kind: "pixel", blend });
+
+const colorBurn = (b: number, s: number): number => (b >= 1 ? 1 : s <= 0 ? 0 : 1 - Math.min(1, (1 - b) / s));
+const colorDodge = (b: number, s: number): number => (b <= 0 ? 0 : s >= 1 ? 1 : Math.min(1, b / (1 - s)));
+const screen = (b: number, s: number): number => 1 - (1 - b) * (1 - s);
+const hardLight = (b: number, s: number): number => (s <= 0.5 ? 2 * b * s : screen(b, 2 * s - 1));
+/** W3C Compositing and Blending Level 1, soft-light. */
+const softLight = (b: number, s: number): number =>
+  s <= 0.5
+    ? b - (1 - 2 * s) * b * (1 - b)
+    : b + (2 * s - 1) * ((b <= 0.25 ? ((16 * b - 12) * b + 4) * b : Math.sqrt(b)) - b);
+
+// Non-separable helpers from the same spec (luma weights 0.3, 0.59, 0.11).
+// These run once per pixel, so they avoid spread arguments; with them the hue mode took ~150 ms per 1280x720 preview.
+const lum = (c: Rgb): number => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
+const max3 = (c: Rgb): number => (c[0] > c[1] ? (c[0] > c[2] ? c[0] : c[2]) : c[1] > c[2] ? c[1] : c[2]);
+const min3 = (c: Rgb): number => (c[0] < c[1] ? (c[0] < c[2] ? c[0] : c[2]) : c[1] < c[2] ? c[1] : c[2]);
+const sat = (c: Rgb): number => max3(c) - min3(c);
+const sum = (c: Rgb): number => c[0] + c[1] + c[2];
+const setSat = (c: Rgb, s: number): Rgb => {
+  const min = min3(c);
+  const range = max3(c) - min;
+  if (range <= 0) return [0, 0, 0];
+  const k = s / range;
+  return [(c[0] - min) * k, (c[1] - min) * k, (c[2] - min) * k];
+};
+const setLum = (c: Rgb, l: number): Rgb => {
+  const d = l - lum(c);
+  const r = c[0] + d;
+  const g = c[1] + d;
+  const b = c[2] + d;
+  const lo = r < g ? (r < b ? r : b) : g < b ? g : b;
+  const hi = r > g ? (r > b ? r : b) : g > b ? g : b;
+  if (lo < 0) {
+    const k = l / (l - lo);
+    return [l + (r - l) * k, l + (g - l) * k, l + (b - l) * k];
+  }
+  if (hi > 1) {
+    const k = (1 - l) / (hi - l);
+    return [l + (r - l) * k, l + (g - l) * k, l + (b - l) * k];
+  }
+  return [r, g, b];
+};
+
+/**
+ * Photoshop's blend modes minus Dissolve, whose random noise would differ between thumbnail,
+ * preview and export. Key order is the order of the UI list.
+ */
+export const BLEND_MODES = {
+  normal: channel((_, s) => s),
+  darken: channel(Math.min),
+  multiply: channel((b, s) => b * s),
+  colorBurn: channel(colorBurn),
+  linearBurn: channel((b, s) => b + s - 1),
+  darkerColor: pixel((b, s) => (sum(s) < sum(b) ? s : b)),
+  lighten: channel(Math.max),
+  screen: channel(screen),
+  colorDodge: channel(colorDodge),
+  linearDodge: channel((b, s) => b + s),
+  lighterColor: pixel((b, s) => (sum(s) > sum(b) ? s : b)),
+  overlay: channel((b, s) => hardLight(s, b)),
+  softLight: channel(softLight),
+  hardLight: channel(hardLight),
+  vividLight: channel((b, s) => (s <= 0.5 ? colorBurn(b, 2 * s) : colorDodge(b, 2 * s - 1))),
+  linearLight: channel((b, s) => b + 2 * s - 1),
+  pinLight: channel((b, s) => (s <= 0.5 ? Math.min(b, 2 * s) : Math.max(b, 2 * s - 1))),
+  hardMix: channel((b, s) => (b + s >= 1 ? 1 : 0)),
+  difference: channel((b, s) => Math.abs(b - s)),
+  exclusion: channel((b, s) => b + s - 2 * b * s),
+  subtract: channel((b, s) => b - s),
+  divide: channel((b, s) => (s <= 0 ? 1 : b / s)),
+  hue: pixel((b, s) => setLum(setSat(s, sat(b)), lum(b))),
+  saturation: pixel((b, s) => setLum(setSat(b, sat(s)), lum(b))),
+  color: pixel((b, s) => setLum(s, lum(b))),
+  luminosity: pixel((b, s) => setLum(b, lum(s))),
+} satisfies Record<string, Blend>;
+export type BlendMode = keyof typeof BLEND_MODES;
+
+/** A solid color composited over the adjusted photo, after saturation. Opacity is an integer in [0, 100]. */
+export interface Layer {
+  readonly color: readonly [number, number, number];
+  readonly mode: BlendMode;
+  readonly opacity: number;
+}
+
 export interface Edit {
   readonly orientation: Orientation;
   readonly adjust: Adjust;
+  /** Bottom to top: layers[0] is composited first. */
+  readonly layers: readonly Layer[];
 }
 
 export const NEUTRAL_ADJUST: Adjust = { exposure: 0, brightness: 0, contrast: 0, blacks: 0, saturation: 0, temperature: 0 };
-export const IDENTITY_EDIT: Edit = { orientation: { turns: 0, flip: false }, adjust: NEUTRAL_ADJUST };
+/** What `addLayer` puts on top. */
+export const NEW_LAYER: Layer = { color: [255, 160, 64], mode: "softLight", opacity: 50 };
+export const IDENTITY_EDIT: Edit = { orientation: { turns: 0, flip: false }, adjust: NEUTRAL_ADJUST, layers: [] };
 
 /** Screen-space operations. Each is a pure Edit -> Edit; the UI never touches Orientation fields. */
 export function rotateLeft(edit: Edit): Edit {
@@ -70,8 +173,47 @@ export function setAdjust(edit: Edit, key: AdjustKey, level: number): Edit {
   return { ...edit, adjust: { ...edit.adjust, [key]: clampInt(level, -100, 100) } };
 }
 
-export function resetAdjust(edit: Edit): Edit {
-  return { ...edit, adjust: NEUTRAL_ADJUST };
+export function addLayer(edit: Edit): Edit {
+  return { ...edit, layers: [...edit.layers, NEW_LAYER] };
+}
+
+export function removeLayer(edit: Edit, index: number): Edit {
+  return { ...edit, layers: edit.layers.filter((_, i) => i !== index) };
+}
+
+/** Swaps a layer with the one above (+1) or below (-1); at either end the edit stays unchanged. */
+export function moveLayer(edit: Edit, index: number, step: 1 | -1): Edit {
+  const to = index + step;
+  if (Math.min(index, to) < 0 || Math.max(index, to) >= edit.layers.length) return edit;
+  const layers = [...edit.layers];
+  [layers[index], layers[to]] = [layers[to], layers[index]];
+  return { ...edit, layers };
+}
+
+/** Accepts only `#rrggbb`; anything else leaves the edit unchanged. */
+export function setLayerColor(edit: Edit, index: number, hex: string): Edit {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return edit;
+  const value = parseInt(hex.slice(1), 16);
+  return changeLayer(edit, index, { color: [value >> 16, (value >> 8) & 255, value & 255] });
+}
+
+/** Accepts only keys of `BLEND_MODES`; anything else leaves the edit unchanged. */
+export function setLayerMode(edit: Edit, index: number, mode: string): Edit {
+  return Object.hasOwn(BLEND_MODES, mode) ? changeLayer(edit, index, { mode: mode as BlendMode }) : edit;
+}
+
+/** Clamps to [0, 100] and rounds. */
+export function setLayerOpacity(edit: Edit, index: number, level: number): Edit {
+  return changeLayer(edit, index, { opacity: clampInt(level, 0, 100) });
+}
+
+function changeLayer(edit: Edit, index: number, change: Partial<Layer>): Edit {
+  return { ...edit, layers: edit.layers.map((layer, i) => (i === index ? { ...layer, ...change } : layer)) };
+}
+
+/** Neutral adjustments and no layers; orientation stays. */
+export function resetColor(edit: Edit): Edit {
+  return { ...edit, adjust: NEUTRAL_ADJUST, layers: [] };
 }
 
 /** Share of near-neutral pixels needed before a color cast is read as the lighting rather than the scene. */
@@ -80,7 +222,7 @@ const MIN_NEUTRAL_SHARE = 0.05;
 const KEY_TARGET = 0.42;
 
 /**
- * Sets every adjust level except saturation from `src`; orientation and saturation stay.
+ * Sets every adjust level except saturation from `src`; orientation, saturation and layers stay.
  * Temperature (only when near-neutral pixels are common enough) takes half the level that makes
  * their mean red equal their mean blue, so a world's own lighting survives. Blacks and exposure
  * then move the 0.5th percentile of the darkest channel to 0 and the 99.5th percentile of the
@@ -159,7 +301,7 @@ function percentile(counts: Uint32Array, total: number, fraction: number): numbe
  * Alpha is copied untouched.
  */
 export function render(src: Pixels, edit: Edit): Pixels {
-  const color = isNeutral(edit.adjust) ? null : compileColor(edit.adjust);
+  const color = isNeutral(edit.adjust) && edit.layers.every((layer) => layer.opacity === 0) ? null : compileColor(edit);
   const { turns, flip } = edit.orientation;
   const { width: w, height: h, data: from } = src;
   const [dw, dh] = turns % 2 ? [h, w] : [w, h];
@@ -184,6 +326,7 @@ export function render(src: Pixels, edit: Edit): Pixels {
         data[o] = luma + (r - luma) * color.saturation;
         data[o + 1] = luma + (g - luma) * color.saturation;
         data[o + 2] = luma + (b - luma) * color.saturation;
+        for (const tint of color.tints) tint(data, o);
       } else {
         data[o] = from[i];
         data[o + 1] = from[i + 1];
@@ -195,21 +338,27 @@ export function render(src: Pixels, edit: Edit): Pixels {
   return { width: dw, height: dh, data };
 }
 
+/** Rewrites the RGB at `data[offset..offset + 2]` in place with the layer composited over it. */
+type Tint = (data: Uint8ClampedArray, offset: number) => void;
+
 /**
- * Adjustment compiled once per edit: three 256-entry LUTs plus a saturation factor.
- * Per pixel this costs three lookups and one luma mix, so a 2 MP export stays well under 100 ms.
+ * Color edit compiled once per render: three 256-entry LUTs, a saturation factor and the layers.
+ * Per pixel this costs three lookups, one luma mix and one tint per layer. A pixel-kind layer mode
+ * costs more: 30–45 ms for a 1280x720 preview in Chromium, against about 25 ms for a table-only edit.
  */
 interface ColorOp {
   readonly lut: readonly [Uint8ClampedArray, Uint8ClampedArray, Uint8ClampedArray];
   /** 0 = grayscale, 1 = unchanged, 2 = double chroma. */
   readonly saturation: number;
+  /** Bottom to top; layers at opacity 0 are left out. */
+  readonly tints: readonly Tint[];
 }
 
 function isNeutral(adjust: Adjust): boolean {
   return ADJUST_KEYS.every((key) => adjust[key] === 0);
 }
 
-function compileColor(adjust: Adjust): ColorOp {
+function compileColor({ adjust, layers }: Edit): ColorOp {
   const k = (key: AdjustKey): number => adjust[key] / 100;
   const temperature = 0.2 * k("temperature");
   const blackPoint = -0.25 * k("blacks");
@@ -228,6 +377,35 @@ function compileColor(adjust: Adjust): ColorOp {
     return out;
   };
   const lut: ColorOp["lut"] = [table(1 - Math.log2(1 + temperature)), table(1), table(1 - Math.log2(1 - temperature))];
-  return { lut, saturation: 1 + k("saturation") };
+  return { lut, saturation: 1 + k("saturation"), tints: layers.filter((layer) => layer.opacity > 0).map(compileTint) };
 }
 
+function compileTint({ color, mode, opacity }: Layer): Tint {
+  const blend = BLEND_MODES[mode];
+  const amount = opacity / 100;
+  if (blend.kind === "pixel") {
+    const layer: Rgb = [color[0] / 255, color[1] / 255, color[2] / 255];
+    return (data, o) => {
+      const base: Rgb = [data[o] / 255, data[o + 1] / 255, data[o + 2] / 255];
+      const mixed = blend.blend(base, layer);
+      data[o] = 255 * (base[0] + (mixed[0] - base[0]) * amount);
+      data[o + 1] = 255 * (base[1] + (mixed[1] - base[1]) * amount);
+      data[o + 2] = 255 * (base[2] + (mixed[2] - base[2]) * amount);
+    };
+  }
+  const table = (c: number): Uint8ClampedArray => {
+    const out = new Uint8ClampedArray(256);
+    for (let v = 0; v < 256; v++) {
+      const base = v / 255;
+      const blended = Math.min(1, Math.max(0, blend.blend(base, c / 255)));
+      out[v] = Math.round(255 * (base + (blended - base) * amount));
+    }
+    return out;
+  };
+  const [tr, tg, tb] = [table(color[0]), table(color[1]), table(color[2])];
+  return (data, o) => {
+    data[o] = tr[data[o]];
+    data[o + 1] = tg[data[o + 1]];
+    data[o + 2] = tb[data[o + 2]];
+  };
+}

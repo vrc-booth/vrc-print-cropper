@@ -1,14 +1,22 @@
 import {
   ADJUST_KEYS,
+  BLEND_MODES,
   IDENTITY_EDIT,
+  addLayer,
   autoAdjust,
   flipHorizontal,
+  moveLayer,
+  removeLayer,
   render,
-  resetAdjust,
+  resetColor,
   rotateLeft,
   rotateRight,
   setAdjust,
+  setLayerColor,
+  setLayerMode,
+  setLayerOpacity,
   type AdjustKey,
+  type BlendMode,
   type Edit,
   type Pixels,
 } from "./edit";
@@ -40,6 +48,16 @@ interface Item {
   readonly row: ListRow;
 }
 
+interface LayerCard {
+  readonly element: HTMLLIElement;
+  readonly color: HTMLInputElement;
+  readonly mode: HTMLSelectElement;
+  readonly opacity: HTMLInputElement;
+  readonly value: HTMLOutputElement;
+  readonly up: HTMLButtonElement;
+  readonly down: HTMLButtonElement;
+}
+
 interface ListRow {
   readonly element: HTMLLIElement;
   readonly button: HTMLButtonElement;
@@ -55,6 +73,12 @@ const ORIENT_ICONS: Record<keyof typeof ORIENT_ACTIONS, string> = {
   flipHorizontal: '<path d="M12 3v18"/><path d="M8 7 3 12l5 5V7z"/><path d="M16 7l5 5-5 5V7z"/>',
 };
 
+const LAYER_ICONS = {
+  layerUp: '<path d="m6 15 6-6 6 6"/>',
+  layerDown: '<path d="m6 9 6 6 6-6"/>',
+  layerRemove: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>',
+} satisfies Partial<Record<MessageKey, string>>;
+
 /** Static elements of index.html and their text. index.html itself carries no message keys. */
 const STATIC_LABELS = {
   "app-title": "appTitle",
@@ -64,6 +88,8 @@ const STATIC_LABELS = {
   "list-empty": "emptyList",
   "no-selection": "noSelection",
   "adjust-title": "adjustments",
+  "layer-title": "layer",
+  "add-layer": "layerAdd",
   auto: "autoAdjust",
   reset: "reset",
   save: "save",
@@ -79,7 +105,9 @@ let nextId = 0;
 let opening = Promise.resolve();
 
 const sliders = new Map<AdjustKey, { readonly input: HTMLInputElement; readonly value: HTMLOutputElement }>();
-const controls: (HTMLButtonElement | HTMLInputElement)[] = [];
+/** Indexed like `Edit.layers`, bottom first. Rebuilt only when the layer count changes, so a drag keeps its pointer. */
+const layerCards: LayerCard[] = [];
+const controls: (HTMLButtonElement | HTMLInputElement | HTMLSelectElement)[] = [];
 
 function byId<E extends HTMLElement>(id: string): E {
   const el = document.getElementById(id);
@@ -237,13 +265,11 @@ function paintThumb(item: Item): void {
   draw(item.row.canvas, render(item.thumb, item.edit));
 }
 
-/** Built from ORIENT_ACTIONS and ADJUST_KEYS; nothing in index.html lists them. */
+/** Built from ORIENT_ACTIONS and ADJUST_KEYS; nothing in index.html lists them. Layer cards come from `syncControls`. */
 function buildEditorControls(): void {
   const orient = byId("orient");
   for (const [key, op] of Object.entries(ORIENT_ACTIONS) as [keyof typeof ORIENT_ACTIONS, (e: Edit) => Edit][]) {
-    const button = accessibleName(document.createElement("button"), key);
-    button.type = "button";
-    button.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ORIENT_ICONS[key]}</svg>`;
+    const button = iconButton(key, ORIENT_ICONS[key]);
     button.addEventListener("click", () => updateEdit(op));
     orient.append(button);
     controls.push(button);
@@ -266,16 +292,75 @@ function buildEditorControls(): void {
     controls.push(input);
   }
 
+  const add = byId<HTMLButtonElement>("add-layer");
+  add.addEventListener("click", () => updateEdit(addLayer));
+  controls.push(add);
+
   const auto = byId<HTMLButtonElement>("auto");
   auto.addEventListener("click", () => {
     const item = selectedItem();
     if (item) updateEdit((e) => autoAdjust(e, item.thumb));
   });
   const reset = byId<HTMLButtonElement>("reset");
-  reset.addEventListener("click", () => updateEdit(resetAdjust));
+  reset.addEventListener("click", () => updateEdit(resetColor));
   const save = byId<HTMLButtonElement>("save");
   save.addEventListener("click", () => void saveSelected());
   controls.push(auto, reset, save);
+}
+
+function iconButton(key: MessageKey, paths: string): HTMLButtonElement {
+  const button = accessibleName(document.createElement("button"), key);
+  button.type = "button";
+  button.className = "icon";
+  button.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+  return button;
+}
+
+/** Controls for `Edit.layers[index]`. Values are filled by `syncControls`. */
+function buildLayerCard(index: number): LayerCard {
+  const color = accessibleName(document.createElement("input"), "layerColor");
+  color.type = "color";
+  color.addEventListener("input", () => updateEdit((e) => setLayerColor(e, index, color.value)));
+  const mode = accessibleName(document.createElement("select"), "layerMode");
+  for (const key of Object.keys(BLEND_MODES) as BlendMode[]) mode.append(label(new Option("", key), `blend_${key}`));
+  mode.addEventListener("change", () => updateEdit((e) => setLayerMode(e, index, mode.value)));
+  const opacity = accessibleName(document.createElement("input"), "layerOpacity");
+  Object.assign(opacity, { type: "range", min: "0", max: "100", step: "1" });
+  opacity.addEventListener("input", () => updateEdit((e) => setLayerOpacity(e, index, Number(opacity.value))));
+  const value = document.createElement("output");
+
+  const up = iconButton("layerUp", LAYER_ICONS.layerUp);
+  const down = iconButton("layerDown", LAYER_ICONS.layerDown);
+  const move = (step: 1 | -1): void => {
+    updateEdit((e) => moveLayer(e, index, step));
+    // Keep focus on the layer that moved; at the top or bottom its button in that direction is disabled.
+    const moved = layerCards[index + step];
+    const [ahead, back] = step === 1 ? [moved.up, moved.down] : [moved.down, moved.up];
+    (ahead.disabled ? back : ahead).focus();
+  };
+  up.addEventListener("click", () => move(1));
+  down.addEventListener("click", () => move(-1));
+  const remove = iconButton("layerRemove", LAYER_ICONS.layerRemove);
+  remove.addEventListener("click", () => {
+    updateEdit((e) => removeLayer(e, index));
+    byId("add-layer").focus();
+  });
+
+  const element = document.createElement("li");
+  element.className = "layer";
+  const look = document.createElement("div");
+  look.className = "layer-row";
+  look.append(color, mode);
+  const strength = document.createElement("div");
+  strength.className = "layer-row";
+  strength.append(opacity, value);
+  const actions = document.createElement("div");
+  actions.className = "layer-row";
+  const spacer = document.createElement("span");
+  spacer.className = "spacer";
+  actions.append(up, down, spacer, remove);
+  element.append(look, strength, actions);
+  return { element, color, mode, opacity, value, up, down };
 }
 
 /** Edit -> control values. Never reads controls back into state. Null disables every control. */
@@ -286,6 +371,20 @@ function syncControls(edit: Edit | null): void {
     input.value = String(level);
     value.textContent = level > 0 ? `+${level}` : level < 0 ? `−${-level}` : "0";
   }
+  const { layers } = edit ?? IDENTITY_EDIT;
+  if (layerCards.length !== layers.length) {
+    layerCards.splice(0, Infinity, ...layers.map((_, i) => buildLayerCard(i)));
+    byId("layers").replaceChildren(...layerCards.map((card) => card.element).reverse());
+  }
+  layers.forEach((layer, i) => {
+    const card = layerCards[i];
+    card.color.value = `#${layer.color.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+    card.mode.value = layer.mode;
+    card.opacity.value = String(layer.opacity);
+    card.value.textContent = `${layer.opacity}%`;
+    card.up.disabled = i === layers.length - 1;
+    card.down.disabled = i === 0;
+  });
 }
 
 function draw(canvas: HTMLCanvasElement, px: Pixels): void {
