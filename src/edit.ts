@@ -208,34 +208,35 @@ const SHADOW_SHARE = 0.3;
 const BLACK = 10 / 255;
 /** Share of pixels darker than BLACK above which shadows count as crushed. */
 const CRUSHED = 0.02;
-/** Shadow hue for photos without a hue of their own: blue, which sets off skin. */
-const COOL = (210 / 180) * Math.PI;
+/** Hue for photos without one: warm light, so the shadows get the cool opposite. */
+const WARM = Math.PI / 6;
 
 /**
  * The layers this photo needs, bottom first. Each answers one measured need and its opacity grows
  * with that need from 10%, the least that shows, so a photo that needs none gets none:
  * - one hue holds most of the color: a soft light tint of it pulls the rest of the picture together,
  *   kept light because it also deepens the cast the photo already has;
- * - colors are washed out: a light color burn of the main hue deepens and saturates them;
+ * - colors are washed out: a light gray color burn deepens and saturates them;
  * - shadows are neutral gray: a dark soft light of the opposite hue colors them without lifting black;
- * - shadows are crushed to black: a dark, grayish screen of the main hue opens them; the opposite
- *   hue would turn black into its color.
+ * - shadows are crushed to black: a dark gray screen opens them.
+ * Only the tint carries the main hue. Burn and lift fix depth, not color, so they stay gray: in the
+ * main hue they pushed every portrait toward its skin color, and the opposite hue turned black into
+ * that color.
  * The opposite hue is the photo's own hue when one lies within 60 degrees of it, so the toning
  * follows the color contrast the photo already has.
  */
 function planLayers(photo: Pixels): Layer[] {
   const { hues, saturation, shadowSaturation, crushed } = measure(photo);
   const main = hues[0];
-  const opposite = main ? (hues.find((h) => hueDistance(h.hue, main.hue + Math.PI) < Math.PI / 3)?.hue ?? main.hue + Math.PI) : COOL;
-  /** The main hue at `s`, or gray of the same brightness when the photo has no hue but skin. */
-  const tone = (s: number, v: number): Rgb => (main ? hsvToRgb(main.hue, s, v) : hsvToRgb(0, 0, v * (1 - s / 2)));
+  const hue = main?.hue ?? WARM;
+  const opposite = hues.find((h) => hueDistance(h.hue, hue + Math.PI) < Math.PI / 3)?.hue ?? hue + Math.PI;
   const layers: Layer[] = [];
-  if (main && main.share >= DOMINANT_SHARE) layers.push({ color: tone(0.6, 1), mode: "softLight", opacity: Math.round(10 + (10 * (main.share - DOMINANT_SHARE)) / (1 - DOMINANT_SHARE)) });
-  if (saturation < DULL) layers.push({ color: tone(0.3, 1), mode: "colorBurn", opacity: Math.round(10 + 30 * (1 - saturation / DULL)) });
+  if (main && main.share >= DOMINANT_SHARE) layers.push({ color: hsvToRgb(hue, 0.6, 1), mode: "softLight", opacity: Math.round(10 + (10 * (main.share - DOMINANT_SHARE)) / (1 - DOMINANT_SHARE)) });
+  if (saturation < DULL) layers.push({ color: hsvToRgb(0, 0, 0.85), mode: "colorBurn", opacity: Math.round(10 + 30 * (1 - saturation / DULL)) });
   if (shadowSaturation < NEUTRAL) {
     layers.push({ color: hsvToRgb(opposite, 0.7, 0.35), mode: "softLight", opacity: Math.round(15 + 20 * (1 - shadowSaturation / NEUTRAL)) });
   }
-  if (crushed > CRUSHED) layers.push({ color: tone(0.4, 0.45), mode: "screen", opacity: Math.round(Math.min(30, 10 + 100 * (crushed - CRUSHED))) });
+  if (crushed > CRUSHED) layers.push({ color: hsvToRgb(0, 0, 0.35), mode: "screen", opacity: Math.round(Math.min(30, 10 + 100 * (crushed - CRUSHED))) });
   return layers;
 }
 
@@ -296,10 +297,8 @@ const MAX_COLORS = 4;
 
 /**
  * The photo's main hues in radians, most common first: at most four, at least 30 degrees apart, each
- * with its share of all color, counting every hue toward the nearest picked one. Each pixel votes for
- * its hue with weight saturation x brightness, so vivid colors decide and gray, dark and washed-out
- * pixels do not. Skin (`isSkin`) counts toward all color but is never picked: in a portrait it would
- * make every grade warm.
+ * with its share of all color, counting every hue toward the nearest picked one. Each pixel votes for its hue with weight saturation x brightness, so
+ * vivid colors decide and gray, dark and washed-out pixels do not.
  */
 export function photoHues(src: Pixels): Array<{ hue: number; share: number }> {
   const { data } = src;
@@ -320,11 +319,10 @@ export function photoHues(src: Pixels): Array<{ hue: number; share: number }> {
     const hue = (((sector * Math.PI) / 3) + 2 * Math.PI) % (2 * Math.PI);
     const bin = Math.min(HUE_BINS - 1, Math.floor((hue / (2 * Math.PI)) * HUE_BINS));
     const w = saturation * value;
-    total += w;
-    if (isSkin(hue, saturation, value)) continue;
     weight[bin] += w;
     cos[bin] += w * Math.cos(hue);
     sin[bin] += w * Math.sin(hue);
+    total += w;
   }
 
   const picked: number[] = [];
@@ -343,19 +341,6 @@ export function photoHues(src: Pixels): Array<{ hue: number; share: number }> {
     share[gaps.indexOf(Math.min(...gaps))] += weight[bin] / total;
   }
   return picked.map((bin, n) => ({ hue: Math.atan2(sin[bin], cos[bin]), share: share[n] }));
-}
-
-/** Skin hues, -20 to 45 degrees, in radians. */
-const SKIN_FROM = (340 / 180) * Math.PI;
-const SKIN_TO = (45 / 180) * Math.PI;
-/** Skin is never more saturated than this, so red and orange light past it still count as color. */
-const SKIN_SATURATION = 0.6;
-/** Skin in shadow reads as dark color, not skin. */
-const SKIN_VALUE = 0.5;
-
-/** Lit, pale-to-moderate pink, peach and tan: the subject's own color rather than the scene's. */
-function isSkin(hue: number, saturation: number, value: number): boolean {
-  return (hue >= SKIN_FROM || hue <= SKIN_TO) && saturation <= SKIN_SATURATION && value >= SKIN_VALUE;
 }
 
 /** Hue in radians, saturation and value in [0, 1]. */
