@@ -26,8 +26,8 @@ export interface Orientation {
   readonly flip: boolean;
 }
 
-/** Single source of truth for the slider list; UI and message keys derive from it. */
-export const ADJUST_KEYS = ["brightness", "contrast", "saturation", "temperature"] as const;
+/** Single source of truth for the slider list and its order; UI and message keys derive from it. */
+export const ADJUST_KEYS = ["exposure", "brightness", "contrast", "blacks", "saturation", "temperature"] as const;
 export type AdjustKey = (typeof ADJUST_KEYS)[number];
 
 /** Integer slider level in [-100, 100]; 0 is neutral. Clamped by `setAdjust`. */
@@ -38,7 +38,7 @@ export interface Edit {
   readonly adjust: Adjust;
 }
 
-export const NEUTRAL_ADJUST: Adjust = { brightness: 0, contrast: 0, saturation: 0, temperature: 0 };
+export const NEUTRAL_ADJUST: Adjust = { exposure: 0, brightness: 0, contrast: 0, blacks: 0, saturation: 0, temperature: 0 };
 export const IDENTITY_EDIT: Edit = { orientation: { turns: 0, flip: false }, adjust: NEUTRAL_ADJUST };
 
 /** Screen-space operations. Each is a pure Edit -> Edit; the UI never touches Orientation fields. */
@@ -60,10 +60,14 @@ function turn(edit: Edit, quarterTurns: 1 | 3): Edit {
   return { ...edit, orientation: { turns: ((turns + quarterTurns) % 4) as Orientation["turns"], flip } };
 }
 
+/** Rounds and clamps; NaN becomes 0. Every caller passes untrusted DOM input. */
+function clampInt(value: number, min: number, max: number): number {
+  return Number.isFinite(value) ? Math.round(Math.min(max, Math.max(min, value))) : 0;
+}
+
 /** Clamps to [-100, 100] and rounds; the slider input is the only caller and is untrusted text. */
 export function setAdjust(edit: Edit, key: AdjustKey, level: number): Edit {
-  const clamped = Number.isFinite(level) ? Math.round(Math.min(100, Math.max(-100, level))) : 0;
-  return { ...edit, adjust: { ...edit.adjust, [key]: clamped } };
+  return { ...edit, adjust: { ...edit.adjust, [key]: clampInt(level, -100, 100) } };
 }
 
 export function resetAdjust(edit: Edit): Edit {
@@ -130,17 +134,23 @@ function isNeutral(adjust: Adjust): boolean {
 
 function compileColor(adjust: Adjust): ColorOp {
   const k = (key: AdjustKey): number => adjust[key] / 100;
+  const temperature = 0.2 * k("temperature");
+  const blackPoint = -0.25 * k("blacks");
+  const gain = 2 ** k("exposure");
   const exponent = 2 ** -k("brightness");
   const slope = 2 ** (1.5 * k("contrast"));
-  const temperature = 0.2 * k("temperature");
-  const table = (gain: number): Uint8ClampedArray => {
+  // A power curve moves the middle and keeps 0 and 1 fixed, so a warm or cool shift never tints white or black.
+  const table = (warmth: number): Uint8ClampedArray => {
     const out = new Uint8ClampedArray(256);
     for (let v = 0; v < 256; v++) {
-      const bright = 255 * (Math.min(255, gain * v) / 255) ** exponent;
-      out[v] = Math.round((bright - 127.5) * slope + 127.5);
+      let x = (v / 255) ** warmth;
+      x = Math.min(1, Math.max(0, (x - blackPoint) / (1 - blackPoint)) * gain);
+      x **= exponent;
+      out[v] = Math.round(((x - 0.5) * slope + 0.5) * 255);
     }
     return out;
   };
-  const lut: ColorOp["lut"] = [table(1 + temperature), table(1), table(1 - temperature)];
+  const lut: ColorOp["lut"] = [table(1 - Math.log2(1 + temperature)), table(1), table(1 - Math.log2(1 - temperature))];
   return { lut, saturation: 1 + k("saturation") };
 }
+

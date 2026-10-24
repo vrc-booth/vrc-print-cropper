@@ -15,7 +15,7 @@
 
 사용자가 읽는 설명:
 
-> VRChat 프린트나 사진을 끌어다 놓거나 "이미지 열기"를 누르세요. 프린트는 흰 프레임과 캡션이 자동으로 잘리고, 다른 이미지는 그대로 둡니다. 목록에서 이미지를 고르고 회전·반전하거나 네 슬라이더를 움직인 뒤 저장하세요. 프린트는 `<이름>_crop.png`, 그 밖의 이미지는 `<이름>_edit.png` 로 저장됩니다. VRChat 메타데이터(월드, 촬영자, 날짜)는 파일에 남습니다. 아무것도 업로드되지 않습니다.
+> VRChat 프린트나 사진을 끌어다 놓거나 "이미지 열기"를 누르세요. 프린트는 흰 프레임과 캡션이 자동으로 잘리고, 다른 이미지는 그대로 둡니다. 목록에서 이미지를 고르고 회전·반전하거나 보정 슬라이더를 움직인 뒤 저장하세요. 프린트는 `<이름>_crop.png`, 그 밖의 이미지는 `<이름>_edit.png` 로 저장됩니다. VRChat 메타데이터(월드, 촬영자, 날짜)는 파일에 남습니다. 아무것도 업로드되지 않습니다.
 
 코드 안의 호출 지점:
 
@@ -39,7 +39,7 @@ expect(render(src, IDENTITY_EDIT).data).toEqual(src.data);
 
 | 파일 | 맡는 것 | DOM |
 |---|---|---|
-| `src/edit.ts` | `Pixels`, `Rect`, `Edit`(D4 방향 + 보정 네 값), 편집 전이 함수, `render` | 없음 |
+| `src/edit.ts` | `Pixels`, `Rect`, `Edit`(D4 방향 + 보정 여섯 값), 편집 전이 함수, `render` | 없음 |
 | `src/print.ts` | 프린트 규격, `classify`, `outputName` | 없음 |
 | `src/png.ts` | `XmpChunk` 브랜드, `findXmpChunk`, `withXmp` | 없음 |
 | `src/source.ts` | `openSource`, `readSource`, `exportSource` | 있음 |
@@ -64,7 +64,7 @@ File ─openSource─► Source{kind,rect,xmp} + thumb(240px)       [한 번 디
 
 **핵심 결정.**
 
-1. **썸네일, 미리보기, 저장이 `render(src, edit)` 하나를 쓴다.** 셋은 입력 해상도만 다르다. 두 번째 경로가 없으니 어긋날 수 없다. 보정은 256칸 표 세 개(색온도 → 밝기 → 대비)와 픽셀별 채도 혼합으로 미리 계산한다. `render(src, IDENTITY_EDIT)` 는 바이트가 같다.
+1. **썸네일, 미리보기, 저장이 `render(src, edit)` 하나를 쓴다.** 셋은 입력 해상도만 다르다. 두 번째 경로가 없으니 어긋날 수 없다. 보정은 256칸 표 세 개(색온도 → 검정 계열 → 노출 → 밝기 → 대비)와 픽셀별 채도 혼합으로 미리 계산한다. `render(src, IDENTITY_EDIT)` 는 바이트가 같다.
 2. **자르기는 디코딩할 때 `drawImage` 의 원본 영역으로 한다.** 배율 1이면 정확한 복사다. 축소도 같은 호출에서 하므로 `readSource` 가 사진 픽셀을 얻는 유일한 길이고, 앱이 보는 모든 픽셀은 이미 잘려 있다.
 3. **`source.ts` 가 깊은 모듈이다.** 세 함수 뒤에 `colorSpaceConversion: "none"`·`premultiplyAlpha: "none"` 디코딩, 캔버스 읽기, 자르기, 축소, PNG 인코딩, XMP 끼우기, 이름 짓기를 숨긴다. ESLint `no-restricted-imports` 로 `print.ts` 와 `png.ts` 는 `source.ts` 만 가져오게 막는다(importable-internals). ESLint는 접근 제어자 규칙 때문에 어차피 들어간다.
 4. **XMP는 청크 통째로 옮긴다.** `findXmpChunk` 는 길이·타입·데이터·CRC를 그대로 잘라 `XmpChunk` 로 표시한다. `withXmp` 는 그 청크를 오프셋 33(IHDR 바로 뒤)에 넣고, 이미 있는 XMP는 먼저 지워 두 번 넣어도 결과가 같다. `findXmpChunk` 는 사용자 파일을 받는 신뢰 경계라서 잘못된 입력에 예외 대신 null을 돌려준다. `withXmp` 의 입력은 우리가 만든 캔버스 출력이므로 모양이 틀리면 버그로 보고 예외를 던진다(boundary-discipline).
@@ -108,7 +108,7 @@ File ─openSource─► Source{kind,rect,xmp} + thumb(240px)       [한 번 디
 - 40장을 순서대로 연다(몇 초). 대신 메모리가 묶이고 동시성 코드가 없다.
 - `main.ts` 는 모듈 수준 상태다. 목록 하나, 선택 하나라 store 계층은 전달만 하는 층이 된다.
 - `STATIC_LABELS` 의 id가 `index.html` 과 어긋나면 컴파일러는 못 잡는다. 대신 첫 화면을 띄우는 순간 `getElementById` 가 null이라 바로 깨진다.
-- 초기화 버튼은 보정 네 값만 되돌리고 회전·반전은 둔다.
+- 초기화 버튼은 보정 여섯 값만 되돌리고 회전·반전은 둔다.
 
 ## 고려한 대안
 
@@ -144,6 +144,7 @@ File ─openSource─► Source{kind,rect,xmp} + thumb(240px)       [한 번 디
 - 색온도 +100이면 회색의 R이 오르고 B가 내린다.
 - 슬라이더 값은 [-100, 100]으로 잘린다.
 - 초기화는 방향을 유지한다.
+- 노출과 검정 계열은 검은색과 흰색 끝을 예상대로 옮긴다. 색온도 ±100에도 순백과 순흑은 그대로다.
 
 **테스트로 잡지 않는 것.** 언어 선택(`pickLocale`)과 화면 연결은 배포본을 열어 직접 확인한다.
 
@@ -166,6 +167,8 @@ File ─openSource─► Source{kind,rect,xmp} + thumb(240px)       [한 번 디
 - 캔버스는 `OffscreenCanvas` 를 쓴다. 디코딩·읽기·인코딩이 DOM 요소를 만들지 않는다.
 - 내려받기 링크의 객체 URL은 10초 뒤에 해제한다. `click()` 직후에 해제하면 일부 브라우저에서 내려받기가 취소된다.
 - 파일 열기는 `<button>` 이 숨긴 `<input type="file">` 을 누른다. `<label>` 은 키보드로 초점을 받지 못한다.
+- 노출과 검정 계열을 보정에 더했다. 밝기(감마)와 대비(가운데 회색 축)만으로는 한쪽 끝만 늘일 수 없어서, 검정이 이미 0인 밤 사진을 밝히면 그늘이 떴다.
+- 색온도는 채널 이득 대신 채널별 거듭제곱 곡선이다. 중간 회색의 변화량은 예전 이득(±20%)과 같고, 0과 255는 움직이지 않는다. 이득 방식은 흰 부분에서 R이 255에 막히고 B만 줄어 하얀 곳이 노래졌다.
 - TypeScript는 6.0으로 고정했다. typescript-eslint 8.72가 6.1 미만만 지원한다.
 - CI에 `pnpm run lint` 단계를 더했다. 접근 제어자와 가져오기 제한 규칙이 린트에만 있기 때문이다. 손으로 다시 배포할 수 있게 `workflow_dispatch` 도 켰다.
 
@@ -173,7 +176,7 @@ File ─openSource─► Source{kind,rect,xmp} + thumb(240px)       [한 번 디
 
 - VRChat PNG가 16비트이거나 ICC·gAMA 청크를 갖는 경우가 있을까? 캔버스는 8비트로 줄인다. 확인한 37장은 IHDR, iTXt, IDAT, IEND뿐이었다.
 - 데스크톱 큰 화면에서 미리보기 1280px이 충분할까, 아니면 `devicePixelRatio` 에 맞춰야 할까?
-- 대비(2^(1.5k))와 색온도(±20% 이득) 상수는 실제 프린트로 한 번 맞춰 본 뒤 테스트로 고정해야 한다.
+- 대비(2^(1.5k))와 색온도(중간 회색 ±20%) 상수는 실제 프린트로 한 번 맞춰 본 뒤 테스트로 고정해야 한다.
 - 8K 같은 큰 일반 사진은 "수 메가픽셀" 가정을 넘는다. iOS 캔버스 한도에 걸릴 수 있다.
 
 ## 다음 구현 단계

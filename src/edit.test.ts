@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  ADJUST_KEYS,
   IDENTITY_EDIT,
   flipHorizontal,
   render,
-  rotateLeft,
   resetAdjust,
+  rotateLeft,
   rotateRight,
   setAdjust,
-  ADJUST_KEYS,
   type Edit,
   type Pixels,
 } from "./edit";
@@ -112,5 +112,42 @@ describe("render", () => {
     const rotated = rotateRight(IDENTITY_EDIT);
     const reset = resetAdjust(setAdjust(rotated, "brightness", 40));
     expect([...render(src, reset).data]).toEqual([...render(src, rotated).data]);
+  });
+});
+
+type Rgb = [number, number, number];
+
+const WHITE: Rgb = [255, 255, 255];
+const BLACK: Rgb = [0, 0, 0];
+
+const rgba = (rgb: Rgb, alpha: number): [number, number, number, number] => [rgb[0], rgb[1], rgb[2], alpha];
+
+/** RGB of one pixel after the edit. */
+const through = (rgb: Rgb, edit: Edit): Rgb => {
+  const out = render(image(1, 1, () => rgba(rgb, 255)), edit).data;
+  return [out[0], out[1], out[2]];
+};
+
+describe("adjustments", () => {
+  it("brightens mid-gray at exposure +100 and keeps black", () => {
+    const edit = setAdjust(IDENTITY_EDIT, "exposure", 100);
+    expect(through([128, 128, 128], edit)[1]).toBeGreaterThan(200);
+    expect(through(BLACK, edit)).toEqual(BLACK);
+  });
+
+  it("sends dark gray to black at blacks -100 and keeps white", () => {
+    const edit = setAdjust(IDENTITY_EDIT, "blacks", -100);
+    expect(through([60, 60, 60], edit)).toEqual(BLACK);
+    expect(through(WHITE, edit)).toEqual(WHITE);
+  });
+
+  it("lifts black at blacks +100", () => {
+    expect(through(BLACK, setAdjust(IDENTITY_EDIT, "blacks", 100))[0]).toBeGreaterThan(0);
+  });
+
+  it.each([-100, 100])("never tints white or black at temperature %i", (level) => {
+    const edit = setAdjust(IDENTITY_EDIT, "temperature", level);
+    expect(through(WHITE, edit)).toEqual(WHITE);
+    expect(through(BLACK, edit)).toEqual(BLACK);
   });
 });
