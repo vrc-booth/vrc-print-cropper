@@ -22,6 +22,7 @@ export const ja: Dict = {
   adjust_blacks: "黒レベル",
   adjust_saturation: "彩度",
   adjust_temperature: "色温度",
+  autoAdjust: "自動補正",
   reset: "リセット",
   save: "PNGで保存",
   loadFailed: "{name} を開けませんでした",

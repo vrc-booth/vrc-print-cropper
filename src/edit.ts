@@ -74,6 +74,83 @@ export function resetAdjust(edit: Edit): Edit {
   return { ...edit, adjust: NEUTRAL_ADJUST };
 }
 
+/** Share of near-neutral pixels needed before a color cast is read as the lighting rather than the scene. */
+const MIN_NEUTRAL_SHARE = 0.05;
+/** Log-average luma (0–1) below which midtones are lifted. */
+const KEY_TARGET = 0.42;
+
+/**
+ * Sets every adjust level except saturation from `src`; orientation and saturation stay.
+ * Temperature (only when near-neutral pixels are common enough) takes half the level that makes
+ * their mean red equal their mean blue, so a world's own lighting survives. Blacks and exposure
+ * then move the 0.5th percentile of the darkest channel to 0 and the 99.5th percentile of the
+ * brightest to 255, exposure only upward. Brightness lifts a low log-average luma 60% of the way
+ * to the target and never darkens. Contrast stays 0.
+ * Each step measures `src` through `render` with the steps before it, so the levels fit the
+ * same curves the user sees. Previous levels are ignored: pressing it twice changes nothing.
+ */
+export function autoAdjust(edit: Edit, src: Pixels): Edit {
+  const { data } = src;
+  const count = data.length / 4;
+  let auto = IDENTITY_EDIT;
+
+  const neutral: number[] = [];
+  for (let i = 0; i < data.length; i += 4) {
+    const max = Math.max(data[i], data[i + 1], data[i + 2]);
+    const min = Math.min(data[i], data[i + 1], data[i + 2]);
+    if (max < 250 && min > 15 && (max - min) / max < 0.15) neutral.push(i);
+  }
+  if (neutral.length >= MIN_NEUTRAL_SHARE * count) {
+    let level = 0;
+    for (let pass = 0; pass < 4; pass++) {
+      const shifted = render(src, setAdjust(IDENTITY_EDIT, "temperature", level)).data;
+      let red = 0;
+      let blue = 0;
+      for (const i of neutral) {
+        red += shifted[i];
+        blue += shifted[i + 2];
+      }
+      level = Math.min(100, Math.max(-100, level + (500 * (blue - red)) / (blue + red)));
+    }
+    auto = setAdjust(auto, "temperature", Math.min(30, Math.max(-30, level * 0.5)));
+  }
+
+  const warmed = render(src, auto).data;
+  const darkest = new Uint32Array(256);
+  const brightest = new Uint32Array(256);
+  for (let i = 0; i < warmed.length; i += 4) {
+    darkest[Math.min(warmed[i], warmed[i + 1], warmed[i + 2])]++;
+    brightest[Math.max(warmed[i], warmed[i + 1], warmed[i + 2])]++;
+  }
+  const black = percentile(darkest, count, 0.005) / 255;
+  if (black > 0) auto = setAdjust(auto, "blacks", (-100 * black) / 0.25);
+  const blackPoint = (-0.25 * auto.adjust.blacks) / 100;
+  const white = (percentile(brightest, count, 0.995) / 255 - blackPoint) / (1 - blackPoint);
+  if (white < 1) auto = setAdjust(auto, "exposure", Math.min(50, 100 * Math.log2(1 / white)));
+
+  const lit = render(src, auto).data;
+  let logSum = 0;
+  for (let i = 0; i < lit.length; i += 4) logSum += Math.log((0.299 * lit[i] + 0.587 * lit[i + 1] + 0.114 * lit[i + 2] + 1) / 256);
+  const key = Math.exp(logSum / count);
+  if (key < KEY_TARGET) {
+    const goal = Math.exp(Math.log(key) + (Math.log(KEY_TARGET) - Math.log(key)) * 0.6);
+    auto = setAdjust(auto, "brightness", Math.min(60, -100 * Math.log2(Math.log(goal) / Math.log(key))));
+  }
+
+  return { ...edit, adjust: { ...auto.adjust, saturation: edit.adjust.saturation } };
+}
+
+/** The value at sorted index floor(fraction * total): the first level whose running count passes that index. */
+function percentile(counts: Uint32Array, total: number, fraction: number): number {
+  const rank = Math.floor(fraction * total);
+  let seen = 0;
+  for (let level = 0; level < 256; level++) {
+    seen += counts[level];
+    if (seen > rank) return level;
+  }
+  return 255;
+}
+
 /**
  * The whole edit pipeline, in one pass over destination pixels.
  * Used unchanged for the list thumbnail, the editor preview and the full-resolution export;

@@ -1,6 +1,7 @@
 import {
   ADJUST_KEYS,
   IDENTITY_EDIT,
+  autoAdjust,
   flipHorizontal,
   render,
   resetAdjust,
@@ -63,6 +64,7 @@ const STATIC_LABELS = {
   "list-empty": "emptyList",
   "no-selection": "noSelection",
   "adjust-title": "adjustments",
+  auto: "autoAdjust",
   reset: "reset",
   save: "save",
   "privacy-note": "privacyNote",
@@ -264,11 +266,16 @@ function buildEditorControls(): void {
     controls.push(input);
   }
 
+  const auto = byId<HTMLButtonElement>("auto");
+  auto.addEventListener("click", () => {
+    const item = selectedItem();
+    if (item) updateEdit((e) => autoAdjust(e, item.thumb));
+  });
   const reset = byId<HTMLButtonElement>("reset");
   reset.addEventListener("click", () => updateEdit(resetAdjust));
   const save = byId<HTMLButtonElement>("save");
   save.addEventListener("click", () => void saveSelected());
-  controls.push(reset, save);
+  controls.push(auto, reset, save);
 }
 
 /** Edit -> control values. Never reads controls back into state. Null disables every control. */

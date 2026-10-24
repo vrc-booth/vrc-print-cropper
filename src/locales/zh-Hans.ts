@@ -22,6 +22,7 @@ export const zhHans: Dict = {
   adjust_blacks: "黑色色阶",
   adjust_saturation: "饱和度",
   adjust_temperature: "色温",
+  autoAdjust: "自动调整",
   reset: "重置",
   save: "保存为 PNG",
   loadFailed: "无法打开 {name}",

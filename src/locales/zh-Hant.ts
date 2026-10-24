@@ -22,6 +22,7 @@ export const zhHant: Dict = {
   adjust_blacks: "黑色",
   adjust_saturation: "飽和度",
   adjust_temperature: "色溫",
+  autoAdjust: "自動調整",
   reset: "重設",
   save: "儲存為 PNG",
   loadFailed: "無法開啟 {name}",

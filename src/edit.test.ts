@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ADJUST_KEYS,
   IDENTITY_EDIT,
+  autoAdjust,
   flipHorizontal,
   render,
   resetAdjust,
@@ -149,5 +150,84 @@ describe("adjustments", () => {
     const edit = setAdjust(IDENTITY_EDIT, "temperature", level);
     expect(through(WHITE, edit)).toEqual(WHITE);
     expect(through(BLACK, edit)).toEqual(BLACK);
+  });
+});
+
+describe("autoAdjust", () => {
+  const gray = (values: readonly number[]): Pixels => image(values.length, 1, (i) => [values[i], values[i], values[i], 255]);
+  const ramp = (count: number, from: number, to: number): number[] =>
+    Array.from({ length: count }, (_, i) => from + ((to - from) * i) / (count - 1));
+  /** A photo with a sliver of clipped black and white, so its 0.5th and 99.5th percentiles are 0 and 255. */
+  const clipped = (body: readonly number[]): number[] => [...Array<number>(6).fill(0), ...body, ...Array<number>(6).fill(255)];
+
+  const luma = (data: Uint8ClampedArray, i: number): number => 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+  const logAverage = (px: Pixels): number => {
+    let sum = 0;
+    for (let i = 0; i < px.data.length; i += 4) sum += Math.log((luma(px.data, i) + 1) / 256);
+    return Math.exp(sum / (px.data.length / 4));
+  };
+  const span = (px: Pixels): number => {
+    const levels: number[] = [];
+    for (let i = 0; i < px.data.length; i += 4) levels.push(luma(px.data, i));
+    levels.sort((a, b) => a - b);
+    return levels[Math.floor(0.995 * levels.length)] - levels[Math.floor(0.005 * levels.length)];
+  };
+  const mean = (px: Pixels, channel: number): number => {
+    let sum = 0;
+    for (let i = channel; i < px.data.length; i += 4) sum += px.data[i];
+    return sum / (px.data.length / 4);
+  };
+
+  it("leaves a well-exposed full-range neutral image within two levels", () => {
+    const { adjust } = autoAdjust(IDENTITY_EDIT, gray(clipped(ramp(988, 40, 250))));
+    for (const key of ADJUST_KEYS) expect(Math.abs(adjust[key])).toBeLessThanOrEqual(2);
+  });
+
+  it("brightens a dark image partway without reaching mid-gray", () => {
+    const dark = gray(clipped(ramp(988, 0, 1).map((v) => 255 * v ** 3)));
+    const edit = autoAdjust(IDENTITY_EDIT, dark);
+    expect(edit.adjust.brightness).toBeGreaterThan(0);
+    const before = logAverage(dark);
+    const after = logAverage(render(dark, edit));
+    expect(after).toBeGreaterThan(before);
+    expect(after).toBeLessThan(0.5);
+  });
+
+  it("never darkens a bright image", () => {
+    const { adjust } = autoAdjust(IDENTITY_EDIT, gray(ramp(256, 170, 254)));
+    expect(adjust.exposure).toBeGreaterThanOrEqual(0);
+    expect(adjust.brightness).toBeGreaterThanOrEqual(0);
+  });
+
+  it("widens a hazy image by lowering blacks and raising exposure", () => {
+    const hazy = gray(ramp(256, 60, 190));
+    const edit = autoAdjust(IDENTITY_EDIT, hazy);
+    expect(edit.adjust.blacks).toBeLessThan(0);
+    expect(edit.adjust.exposure).toBeGreaterThan(0);
+    expect(span(render(hazy, edit))).toBeGreaterThan(span(hazy) + 20);
+  });
+
+  it("removes about half of a warm cast on near-neutral pixels", () => {
+    const warm = image(141, 1, (i) => [70 + i + 10, 70 + i, 70 + i - 10, 255]);
+    const edit = autoAdjust(IDENTITY_EDIT, warm);
+    expect(edit.adjust.temperature).toBeLessThan(0);
+    const cast = (px: Pixels): number => (mean(px, 0) - mean(px, 2)) / (mean(px, 0) + mean(px, 2));
+    const kept = cast(render(warm, setAdjust(IDENTITY_EDIT, "temperature", edit.adjust.temperature))) / cast(warm);
+    expect(kept).toBeGreaterThan(0.3);
+    expect(kept).toBeLessThan(0.7);
+  });
+
+  it("leaves temperature alone when no pixel is near-neutral", () => {
+    const vivid = image(60, 1, (i) => [[220, 30, 30, 255], [30, 220, 30, 255], [30, 30, 220, 255]][i % 3] as [number, number, number, number]);
+    expect(autoAdjust(IDENTITY_EDIT, vivid).adjust.temperature).toBe(0);
+  });
+
+  it("keeps orientation and saturation, and a second press changes nothing", () => {
+    const src = image(64, 1, (i) => [30 + 2 * i, 20 + i, 60 + i, 255]);
+    const before = setAdjust(setAdjust(rotateRight(IDENTITY_EDIT), "saturation", 30), "brightness", 80);
+    const once = autoAdjust(before, src);
+    expect(once.orientation).toEqual(before.orientation);
+    expect(once.adjust.saturation).toBe(30);
+    expect(autoAdjust(once, src)).toEqual(once);
   });
 });

@@ -20,6 +20,7 @@ export const ko = {
   adjust_blacks: "검정 계열",
   adjust_saturation: "채도",
   adjust_temperature: "색온도",
+  autoAdjust: "자동 보정",
   reset: "초기화",
   save: "PNG로 저장",
   loadFailed: "{name}을(를) 열 수 없습니다",

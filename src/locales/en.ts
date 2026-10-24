@@ -22,6 +22,7 @@ export const en: Dict = {
   adjust_blacks: "Blacks",
   adjust_saturation: "Saturation",
   adjust_temperature: "Temperature",
+  autoAdjust: "Auto adjust",
   reset: "Reset",
   save: "Save PNG",
   loadFailed: "Could not open {name}",
